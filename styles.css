@@ -136,3 +136,8 @@ td, th { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; w
   #matrix .text-button,.theme-keywords .text-button {display:inline!important;}
   .theme-group > button,#clear-theme {display:none!important;}
 }
+
+@media print {
+  .panel:has(#matrix), .panel:has(#sites) {break-inside:avoid;}
+  #results-heading:focus {outline:none;}
+}
