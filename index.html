@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="中国語圏メディアにおける対日関連語句の保存済み観測を可視化する研究ダッシュボード。">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; object-src 'none'">
+<title>Narrative Monitor | 観測ダッシュボード</title><link rel="stylesheet" href="./styles.css"><script type="module" src="./app.mjs"></script></head>
+<body><header><h1>Narrative Monitor</h1><div class="updated">データ生成（JST） <strong id="updated">読込中</strong></div></header>
+<main>
+<section class="print-context" aria-label="印刷条件"><p id="print-filters"></p><p id="print-url"></p><p id="printed-at"></p></section>
+<form id="filters" class="panel filters"><div class="preset-row" id="presets" aria-label="期間プリセット"></div>
+<p id="period-note"></p>
+<div class="controls">
+<label>媒体<select id="site"><option value="all">すべての媒体</option></select></label>
+<label>監視語句<select id="term"><option value="all">すべての語句</option></select></label>
+<label>テーマ<select id="topic"><option value="all">すべてのテーマ</option></select></label>
+</div>
+<details><summary>期間・集計設定</summary><div class="controls">
+<label>開始日<input id="start" type="date" required></label><label>終了日<input id="end" type="date" required></label>
+<label>集計粒度<select id="grain"><option value="day">日単位</option><option value="week">週単位（月曜開始）</option><option value="month">月単位</option></select></label>
+<label>指標<select id="metric"><option value="articles">ユニーク一致記事数</option><option value="occurrences">語句の出現回数</option></select></label>
+<label>時間軸<select id="axis"><option value="first_seen">初回観測日時</option><option value="published">記載公開日時</option></select></label>
+<button type="submit" class="apply">条件を適用</button></div><button id="fixed-link" type="button" class="text-button">期間を固定したURLにする</button></details></form>
+<p id="error" role="alert" hidden></p>
+<div id="loading" role="status">保存済み観測データを読み込んでいます。</div>
+<div id="content" hidden>
+<section class="metrics" id="metrics" aria-label="選択期間の概要"></section>
+<section class="panel"><div class="section-heading"><h2>語句の出現推移</h2><span id="chart-label"></span></div>
+<div id="chart" role="img" aria-label="選択条件による時系列グラフ"></div>
+<p class="note"><span id="axis-note"></span> 空白は観測未確認です。</p>
+<details><summary>時系列データ</summary><div class="scroll" id="series-table"></div></details></section>
+<div class="comparison-heading"><h2>比較</h2><span id="comparison-metric"></span></div>
+<div class="comparisons"><div class="comparison-pair">
+<section class="panel"><h3>媒体別</h3><div id="site-comparison"></div>
+<details><summary>収集状況と本文品質</summary><p id="latest"></p><div class="scroll" id="sites"></div><p class="note">品質は選択期間の記事について、データ生成時点での状態を示します。</p></details></section>
+<section class="panel"><h3>テーマ別</h3><div id="topics"></div></section></div>
+<section class="panel term-comparison"><h3>監視語句別</h3><div id="terms"></div></section>
+</div>
+<section class="panel"><div class="section-heading"><h2>検出記事</h2><span id="article-count" aria-live="polite"></span></div>
+<div id="articles"></div><nav id="article-pages" aria-label="記事ページ" hidden><button id="previous" type="button">前へ</button><button id="next" type="button">次へ</button></nav></section>
+<details class="limits"><summary>媒体別・月別の保存状況</summary><p class="note">媒体全体の月別集計。遡及候補の月にはURLの日付を含むため、記載公開月とは異なる場合があります。候補数は登録できた範囲で、網羅率は未確認です。</p><div class="scroll" id="monthly-coverage"></div></details>
+<details class="limits"><summary>観測の範囲と限界</summary><p class="note" id="scope"></p><ul id="limits"></ul><p>正式辞書 <code id="version"></code></p><p id="dictionary"></p></details></div></main></body></html>

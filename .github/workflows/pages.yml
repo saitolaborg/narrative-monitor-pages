@@ -1,0 +1,55 @@
+# Template for the SEPARATE PUBLIC repository. Not installed in this private repo's .github/.
+name: Deploy public dashboard to Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    permissions:
+      contents: read
+      pages: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v5
+      - name: Validate and stage public files only
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,pathlib,shutil
+          root=pathlib.Path('.')
+          manifest=json.loads((root/'PUBLICATION.json').read_text())
+          allowed={'index.html','styles.css','app.mjs','model.mjs','data.json','.nojekyll'}
+          assert set(manifest['files'])==allowed
+          dest=root/'_site'
+          dest.mkdir()
+          for name,digest in manifest['files'].items():
+              path=root/name
+              assert path.is_file() and not path.is_symlink()
+              assert hashlib.sha256(path.read_bytes()).hexdigest()==digest
+              shutil.copyfile(path,dest/name)
+          data=json.loads((dest/'data.json').read_text())
+          assert data['metadata']['schema_version']==1
+          assert len(data['terms'])==17
+          PY
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
