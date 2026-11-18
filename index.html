@@ -24,17 +24,13 @@
 <div id="content" hidden>
 <section class="metrics" id="metrics" aria-label="選択期間の概要"></section>
 <section class="panel"><div class="section-heading"><h2>語句の出現推移</h2><span id="chart-label"></span></div>
-<div id="chart" role="img" aria-label="選択条件による時系列グラフ"></div>
+<div id="chart" aria-label="選択条件による時系列グラフ"></div>
 <p class="note"><span id="axis-note"></span> 空白は観測未確認です。</p>
 <details><summary>時系列データ</summary><div class="scroll" id="series-table"></div></details></section>
-<div class="comparison-heading"><h2>比較</h2><span id="comparison-metric"></span></div>
-<div class="comparisons"><div class="comparison-pair">
-<section class="panel"><h3>媒体別</h3><div id="site-comparison"></div>
-<details><summary>収集状況と本文品質</summary><p id="latest"></p><div class="scroll" id="sites"></div><p class="note">品質は選択期間の記事について、データ生成時点での状態を示します。</p></details></section>
-<section class="panel"><h3>テーマ別</h3><div id="topics"></div></section></div>
-<section class="panel term-comparison"><h3>監視語句別</h3><div id="terms"></div></section>
-</div>
-<section class="panel"><div class="section-heading"><h2>検出記事</h2><span id="article-count" aria-live="polite"></span></div>
+<section class="panel"><div class="section-heading"><h2>監視テーマ・キーワード</h2><button id="clear-theme" type="button">語句・テーマを解除</button></div><div id="theme-groups"></div></section>
+<section class="panel"><h2>媒体 × テーマ</h2><p class="note">期間内の一致記事数。複数テーマに一致する記事は各列に1件ずつ表示します。— は観測未確認です。</p><div class="scroll" id="matrix"></div></section>
+<section class="panel"><div class="section-heading"><h2 id="results-heading" tabindex="-1">検出記事</h2><span id="article-count" aria-live="polite"></span></div>
 <div id="articles"></div><nav id="article-pages" aria-label="記事ページ" hidden><button id="previous" type="button">前へ</button><button id="next" type="button">次へ</button></nav></section>
+<section class="panel"><h2>監視対象媒体と収集状況</h2><p id="latest"></p><div class="scroll" id="sites"></div></section>
 <details class="limits"><summary>媒体別・月別の保存状況</summary><p class="note">媒体全体の月別集計。遡及候補の月にはURLの日付を含むため、記載公開月とは異なる場合があります。候補数は登録できた範囲で、網羅率は未確認です。</p><div class="scroll" id="monthly-coverage"></div></details>
 <details class="limits"><summary>観測の範囲と限界</summary><p class="note" id="scope"></p><ul id="limits"></ul><p>正式辞書 <code id="version"></code></p><p id="dictionary"></p></details></div></main></body></html>

@@ -111,3 +111,28 @@ td, th { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; w
   .comparison-heading, .comparisons h3 { break-after: avoid; }
   .comparisons h3 { font-size: 10pt; }
 }
+
+#theme-groups {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:.6rem;}
+.theme-group {border:1px solid #d8dfd7;padding:.6rem;align-self:start;}
+.theme-keywords {display:flex;flex-wrap:wrap;gap:.25rem;}
+.theme-group button,[data-theme] summary {margin:.2rem 0;}
+.theme-group button[aria-pressed="true"] {background:#006b59;color:white;}
+.chart-point {cursor:pointer;}
+.chart-point:focus {stroke:#161c19;stroke-width:3;}
+#matrix th {min-width:6rem;white-space:normal;}
+#matrix td {text-align:center;}
+#matrix td:first-child {text-align:left;}
+#matrix button {min-height:2rem;}
+.print-source {display:none;}
+@media print {
+  #theme-groups details {display:block!important;}
+  .theme-keywords, #theme-groups details:not([open]) > .theme-keywords {display:flex!important;}
+  #theme-groups details::details-content {content-visibility:visible!important;}
+  #theme-groups {grid-template-columns:repeat(3,1fr);}
+  .theme-group,.article,#matrix tr,#chart {break-inside:avoid;}
+  .print-source {display:block;overflow-wrap:anywhere;}
+  #matrix th {min-width:0;}
+  #matrix button,.theme-group button {color:#111!important;background:white!important;}
+  #matrix .text-button,.theme-keywords .text-button {display:inline!important;}
+  .theme-group > button,#clear-theme {display:none!important;}
+}
