@@ -1,4 +1,4 @@
-import {fromURL,resolveState,toURL,aggregate,drillPeriod,articleURL} from './model.mjs';
+import {includesRoute,fromURL,resolveState,toURL,aggregate,drillPeriod,articleURL} from './model.mjs';
 const $=id=>document.getElementById(id);
 const labels={continuous:'継続収集対象',hold:'取得停止・保留',trial_only:'通常の定期設定なし',stopped:'継続設定あり・停止中',unverified:'稼働未確認'};
 const fmt=n=>n===null||n===undefined?'未確認':Number(n).toLocaleString('ja-JP'),pct=n=>n===null?'未確認':n.toFixed(1)+'%';
@@ -105,6 +105,7 @@ function articleCard(article) {
   card.append(
     el('p',`出現 ${article.matches.reduce((sum,match)=>sum+match.occurrences,0)}回`),
     el('p',`記載公開日時 ${date(article.published_at)}${article.publication_timezone_assumed?'（タイムゾーン仮定あり）':''} ／ 初回観測 ${date(article.first_seen_at)}`),
+    el('p',`${({openai:'OpenAI補完',openai_multiple:'複数経路（OpenAIで初回発見）',multiple:'複数経路'})[article.discovery] || '通常収集'} ／ ${article.body_ok?'本文抽出済み':article.body_received?'部分テキスト':'本文未確認'}`),
     el('p',article.overview?.text || '概要未取得'),
   );
   if (!article.published_at && article.published_raw) {
@@ -158,7 +159,7 @@ function matrixButton(site,cell) {
   return button;
 }
 function render(){const result=aggregate(dataset,state);$('error').hidden=true;$('loading').hidden=true;$('content').hidden=false;
-for(const k of ['start','end','site','term','topic','grain','metric','axis'])$(k).value=state[k];
+for(const k of ['start','end','site','term','topic','grain','metric','axis','route'])$(k).value=state[k];
 for(const b of $('presets').children)b.setAttribute('aria-pressed',String(b.dataset.preset===state.preset));
 $('updated').textContent=date(dataset.metadata.generated_at_jst);$('latest').textContent='選択媒体・期間終端までの最新収集成功: '+date(result.latestSuccess);
 $('period-note').textContent = `${state.start} 〜 ${state.end}（JST）`;
@@ -166,19 +167,20 @@ const selectedLabel = id => $(id).selectedOptions[0].textContent;
 $('print-filters').textContent = [
   $('period-note').textContent,
   selectedLabel('site'), selectedLabel('term'), selectedLabel('topic'),
-  selectedLabel('axis'), selectedLabel('grain'), selectedLabel('metric'),
+  selectedLabel('route'), selectedLabel('axis'), selectedLabel('grain'), selectedLabel('metric'),
 ].join(' ／ ');
 $('axis-note').textContent = state.axis === 'published'
   ? '記載公開日時が分かる保存記事を集計します。'
   : '初回観測日で集計します。遡及収集した記事も発見日に計上されます。';
 const monthly = new Map();
 for (const row of [...dataset.cohorts, ...dataset.articles]) {
-  if (!row.published_day || row.published_day < state.start || row.published_day > state.end
+  if (!includesRoute(row,state.route) || !row.published_day || row.published_day < state.start || row.published_day > state.end
       || (state.site !== 'all' && row.site !== state.site)) continue;
   const key = row.published_day.slice(0, 7) + ' ' + row.site;
   monthly.set(key, (monthly.get(key) || 0) + row.count);
 }
-const backfill = new Map((dataset.backfill_months || []).map(row => [row.month + ' ' + row.site, row]));
+const progressRows = state.route === 'openai' ? [] : dataset.backfill_months || [];
+const backfill = new Map(progressRows.map(row => [row.month + ' ' + row.site, row]));
 const progressCells = progress => [
   progress?.candidates ?? '—', progress?.pending ?? '—', progress?.extracted ?? '—',
   progress?.forbidden ?? '—',
@@ -196,7 +198,7 @@ for (const month = new Date(state.start.slice(0, 7) + '-01T00:00Z');
       ...progressCells(progress)]);
   }
 }
-for (const row of (dataset.backfill_months || []).filter(row => row.month === null)) {
+for (const row of progressRows.filter(row => row.month === null)) {
   if (state.site !== 'all' && row.site !== state.site) continue;
   months.push(['日付不明', result.sites.find(site => site.id === row.site)?.label || row.site,
     '—', ...progressCells(row)]);
@@ -205,6 +207,7 @@ table('monthly-coverage', ['月（JST）', '媒体', '公開月別の保存記�
 const s = result.summary;
 $('metrics').replaceChildren(...[
   ['一致記事数', s.matched], ['出現回数', s.occurrences], ['観測記事数', s.observed],
+  ['収集媒体数', result.sites.filter(site => site.observed > 0).length],
 
 ].map(([label, n]) => {
   const box = el('div', undefined, 'metric');
@@ -244,9 +247,9 @@ for(const [value,label] of [['7','直近7日'],['30','直近30日'],['90','直�
   if (value === 'custom') $('start').closest('details').open = true;
   apply({...state, preset:value, grain:undefined});
 });$('presets').append(b);}
-$('filters').addEventListener('submit',event=>{event.preventDefault();apply({...state,...Object.fromEntries(['start','end','site','term','topic','grain','metric','axis'].map(k=>[k,$(k).value]))});});
+$('filters').addEventListener('submit',event=>{event.preventDefault();apply({...state,...Object.fromEntries(['start','end','site','term','topic','grain','metric','axis','route'].map(k=>[k,$(k).value]))});});
 for(const id of ['start','end'])$(id).addEventListener('change',()=>apply({...state,preset:'custom',start:$('start').value,end:$('end').value,grain:undefined}));
-for(const id of ['site','term','topic','grain','metric','axis'])$(id).addEventListener('change',()=>apply({...state,[id]:$(id).value}));
+for(const id of ['site','term','topic','grain','metric','axis','route'])$(id).addEventListener('change',()=>apply({...state,[id]:$(id).value}));
 $('previous').addEventListener('click', () => { articlePage--; renderArticles(); });
 $('next').addEventListener('click', () => { articlePage++; renderArticles(); });
 $('clear-theme').addEventListener('click',()=>apply({...state,term:'all',topic:'all'}));

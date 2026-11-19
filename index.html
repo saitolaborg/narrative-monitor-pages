@@ -8,10 +8,11 @@
 <section class="print-context" aria-label="印刷条件"><p id="print-filters"></p><p id="print-url"></p><p id="printed-at"></p></section>
 <form id="filters" class="panel filters"><div class="preset-row" id="presets" aria-label="期間プリセット"></div>
 <p id="period-note"></p>
-<div class="controls">
+<div class="controls primary-controls">
 <label>媒体<select id="site"><option value="all">すべての媒体</option></select></label>
 <label>監視語句<select id="term"><option value="all">すべての語句</option></select></label>
 <label>テーマ<select id="topic"><option value="all">すべてのテーマ</option></select></label>
+<label>発見経路<select id="route"><option value="all">統合観測</option><option value="regular">通常収集のみ</option><option value="openai">OpenAI補完で新規発見</option></select></label>
 </div>
 <details><summary>期間・集計設定</summary><div class="controls">
 <label>開始日<input id="start" type="date" required></label><label>終了日<input id="end" type="date" required></label>

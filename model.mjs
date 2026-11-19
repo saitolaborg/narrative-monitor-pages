@@ -23,7 +23,7 @@ export function resolveState(input,data,now=new Date()){
  const site=data.sites.some(s=>s.id===input.site)?input.site:'all';
  const term=data.terms.some(t=>String(t.id)===input.term)?input.term:'all';
  const topic=data.terms.some(t=>t.topic===input.topic)?input.topic:'all';
- return {preset,start,end,site,term,topic,grain:['day','week','month'].includes(input.grain)?input.grain:autoGrain(start,end),metric:input.metric==='occurrences'?'occurrences':'articles',axis:input.axis==='published'?'published':'first_seen'};
+ return {preset,start,end,site,term,topic,route:['regular','openai'].includes(input.route)?input.route:'all',grain:['day','week','month'].includes(input.grain)?input.grain:autoGrain(start,end),metric:input.metric==='occurrences'?'occurrences':'articles',axis:input.axis==='published'?'published':'first_seen'};
 }
 export function fromURL(search,data,now){return resolveState(Object.fromEntries(new URLSearchParams(search)),data,now);}
 export function toURL(state){return '?'+new URLSearchParams(state).toString();}
@@ -45,11 +45,16 @@ export function articleURL(value) {
  }
 }
 
+export function includesRoute(row, route) {
+ if (route==='regular') return row.discovery!=='openai';
+ if (route==='openai') return ['openai','openai_multiple'].includes(row.discovery);
+ return true;
+}
 export function aggregate(data,state){
  const selectedTerms=new Set(data.terms.filter(t=>(state.term==='all'||String(t.id)===state.term)&&(state.topic==='all'||t.topic===state.topic)).map(t=>t.id));
  const filterMatch=state.term!=='all'||state.topic!=='all';
  const matching=(a)=>(a.matches||[]).filter(m=>selectedTerms.has(m.term_id));
- const all = [...data.cohorts,...data.articles].filter(a=>state.site==='all'||a.site===state.site);
+ const all = [...data.cohorts,...data.articles].filter(a=>(state.site==='all'||a.site===state.site)&&includesRoute(a,state.route));
  const population=all.filter(a=>!filterMatch||matching(a).length);
  const axis=state.axis==='published'?'published_day':'first_seen_day';
  const unknown=population.filter(a=>!a.published_day).reduce((n,a)=>n+a.count,0);
@@ -69,14 +74,14 @@ export function aggregate(data,state){
  // Fill zeroes only within the selected range; accompanying run coverage disambiguates missing data.
  for(let day=state.start;day<=state.end;day=addDays(day,1))time.set(bucket(day,state.grain),[]);
  for(const a of coverageRows)time.get(bucket(a[axis],state.grain))?.push(a);
- const selectedRuns=data.sites.filter(s=>state.site==='all'||s.id===state.site).flatMap(s=>s.runs).filter(r=>{const day=jstDay(new Date(r.started_at));return day>=state.start&&day<=state.end;});
+ const selectedRuns=state.route==='openai'?[]:data.sites.filter(s=>state.site==='all'||s.id===state.site).flatMap(s=>s.runs).filter(r=>{const day=jstDay(new Date(r.started_at));return day>=state.start&&day<=state.end;});
  const series=[...time].map(([date,items])=>{const runs=selectedRuns.filter(r=>bucket(jstDay(new Date(r.started_at)),state.grain)===date);
  const collectionState=items.some(a=>a.checked || (a.matches || []).length)?'saved':axis==='first_seen_day' && runs.some(r=>r.confirmed&&r.matching_observed)?'observed_zero':runs.some(r=>r.status==='failed')?'failed':'no_run';
  return {date,collectionState,...counts(filterMatch ? items.filter(a=>matching(a).length) : items)};});
  const sites=data.sites.filter(s=>state.site==='all'||s.id===state.site).map(s=>{
-  const items=rows.filter(a=>a.site===s.id),runs=s.runs.filter(r=>jstDay(new Date(r.started_at))>=state.start&&jstDay(new Date(r.started_at))<=state.end);
-  const saved=runs.filter(r=>r.confirmed),latest=s.runs.filter(r=>r.confirmed&&r.matching_observed&&r.status==='complete'&&r.finished_at&&jstDay(new Date(r.finished_at))<=state.end).map(r=>r.finished_at).sort().at(-1)||null;
-  const observationState=runs.some(r=>r.status==='failed')?'収集失敗あり':runs.length&&!saved.length?'保存未確認':saved.length?(items.length?'保存観測あり':'観測0件（保存確認あり）'):'対象期間のrunなし／欠測未確認';
+  const items=rows.filter(a=>a.site===s.id),sourceRuns=state.route==='openai'?[]:s.runs,runs=sourceRuns.filter(r=>jstDay(new Date(r.started_at))>=state.start&&jstDay(new Date(r.started_at))<=state.end);
+  const saved=runs.filter(r=>r.confirmed),latest=sourceRuns.filter(r=>r.confirmed&&r.matching_observed&&r.status==='complete'&&r.finished_at&&jstDay(new Date(r.finished_at))<=state.end).map(r=>r.finished_at).sort().at(-1)||null;
+  const observationState=state.route==='openai'&&items.length?'保存観測あり':runs.some(r=>r.status==='failed')?'収集失敗あり':runs.length&&!saved.length?'保存未確認':saved.length?(items.length?'保存観測あり':'観測0件（保存確認あり）'):'対象期間のrunなし／欠測未確認';
   return {...s,...counts(items),periodRuns:runs.length,coverage:observationState,latestPeriodSuccess:latest};
  });
  const terms=data.terms.filter(t=>selectedTerms.has(t.id)).map(t=>({...t,...counts(rows.map(a=>({...a,matches:(a.matches||[]).filter(m=>m.term_id===t.id)})))}));
@@ -84,7 +89,7 @@ export function aggregate(data,state){
  const activeTopics = new Set([...selectedTerms].map(id=>termTopics.get(id)));
  const matrix = sites.map(site => {
   const observed = coverageRows.some(a => a.site === site.id && a.checked) ||
-    (state.axis !== 'published' && site.runs.some(run => run.matching_observed && run.confirmed &&
+    (state.route !== 'openai' && state.axis !== 'published' && site.runs.some(run => run.matching_observed && run.confirmed &&
       inPeriod({[axis]:jstDay(new Date(run.started_at))})));
   const cells = (data.themes || []).map(theme => {
    const active = activeTopics.has(theme.id);
