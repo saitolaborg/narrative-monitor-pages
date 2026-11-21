@@ -90,7 +90,11 @@ export function aggregate(data,state){
  }
  const publicationSeries=[...publishedBuckets].map(([date,items])=>{
   const collectionState=items.some(confirmed)?'saved':items.length?'unjudged':'no_run';
-  return {date,collectionState,...counts(items)};
+  const termOccurrences={};
+  for(const item of items) for(const hit of matching(item)) {
+   termOccurrences[hit.term_id]=(termOccurrences[hit.term_id] || 0)+hit.occurrences;
+  }
+  return {date,collectionState,...counts(items),termOccurrences};
  });
  const sites=data.sites.filter(s=>state.site==='all'||s.id===state.site).map(s=>{
   const items=rows.filter(a=>a.site===s.id),sourceRuns=canUseRuns?s.runs:[],runs=sourceRuns.filter(r=>jstDay(new Date(r.started_at))>=state.start&&jstDay(new Date(r.started_at))<=state.end);

@@ -34,65 +34,181 @@ const publicationBasis = {
   rss_explicit:'RSS掲載日時', sitemap_explicit:'サイトマップ掲載日時', unknown:'根拠なし', conflict:'証拠の不一致',
 };
 
+let chartRows, chartWidth;
+const chartContainer = $('chart');
+const measuredChartWidth = () => Math.max(240, chartContainer.clientWidth || 960);
+
 function chart(rows) {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 1100 290');
-  const key = 'occurrences';
-  const maximum = Math.max(1, ...rows.map(row => row[key]));
+  chartRows = rows;
+  const width = chartWidth = measuredChartWidth();
+  const height = width < 500 ? 236 : 290;
+  const top = 22, bottom = height - 34, right = width - 14;
+  const maximum = rows.reduce((largest, row) => Math.max(largest, row.occurrences), 1);
   const ticks = Math.min(4, maximum);
   const step = Math.ceil(maximum / ticks);
-  const xAt = i => 80 + i * 990 / Math.max(1, rows.length - 1);
-  const yAt = value => 240 - 208 * value / (ticks * step);
-  function node(tag, attrs, text) {
-    const n = document.createElementNS(ns, tag);
+  const left = Math.max(35, fmt(ticks * step).length * 8 + 12);
+  const xAt = i => rows.length <= 1 ? (left + right) / 2 : left + i * (right - left) / (rows.length - 1);
+  const yAt = value => bottom - (bottom - top) * value / (ticks * step);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('role', 'group');
+  svg.setAttribute('aria-label', '記事掲載日基準の語句出現回数');
+  function node(tag, attrs, text, parent = svg) {
+    const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (const [key, value] of Object.entries(attrs)) n.setAttribute(key, value);
     if (text !== undefined) n.textContent = text;
-    svg.append(n);
+    parent.append(n);
     return n;
   }
+
   for (let i = 0; i <= ticks; i++) {
     const y = yAt(i * step);
-    node('line', {x1:80, y1:y, x2:1070, y2:y, stroke:'#d8dfd7'});
-    node('text', {x:4, y:y+4}, fmt(i * step));
+    node('line', {x1:left, y1:y, x2:right, y2:y, class:'chart-grid'});
+    node('text', {x:left-7, y:y+4, 'text-anchor':'end'}, fmt(i * step));
   }
+  const last = rows.length - 1;
+  const tickStride = Math.max(1, Math.ceil(135 * Math.max(1,last) / (right-left)));
+  const dateTicks = last >= 0 ? [0] : [];
+  for (let index = tickStride; index <= last-tickStride; index += tickStride) dateTicks.push(index);
+  if (last > 0) dateTicks.push(last);
+  for (const index of dateTicks) {
+    const x = xAt(index);
+    const anchor = last === 0 ? 'middle' : index === 0 ? 'start' : index === last ? 'end' : 'middle';
+    node('line', {x1:x, y1:top, x2:x, y2:bottom+5, class:'chart-grid chart-date-grid'});
+    node('text', {x, y:bottom+21, 'text-anchor':anchor, class:'chart-date-label'}, rows[index].date);
+  }
+
+  const points = rows.flatMap((row, index) => unknownStates.has(row.collectionState) ? [] :
+    [{row, index, x:xAt(index), y:yAt(row.occurrences)}]);
   let segment = [];
-  function flush() {
+  function drawSegment() {
     if (segment.length > 1) node('polyline', {
-      points:segment.join(' '), fill:'none', stroke:'#006b59', 'stroke-width':3,
+      points:segment.map(({x,y})=>`${x},${y}`).join(' '), class:'chart-series',
     });
     segment = [];
   }
-  rows.forEach((row, index) => {
-    if (unknownStates.has(row.collectionState)) flush();
-    else segment.push(`${xAt(index)},${yAt(row[key])}`);
-  });
-  flush();
-  const dateIndices = new Set(Array.from({length:5}, (_, i) => Math.round(i * (rows.length - 1) / 4)));
-  rows.forEach((row, index) => {
-    const x = xAt(index);
-    if (dateIndices.has(index)) {
-      const first = index === 0, last = index === rows.length - 1;
-      node('text', {x, y:275, class:first || last ? 'end-date' : 'intermediate-date',
-        'text-anchor':first ? 'start' : last ? 'end' : 'middle'}, row.date);
+  for (const point of points) {
+    if (segment.length && point.index !== segment.at(-1).index + 1) drawSegment();
+    segment.push(point);
+  }
+  drawSegment();
+  const guides = node('g', {class:'chart-guides', visibility:'hidden', 'aria-hidden':'true'});
+  const vertical = node('line', {}, undefined, guides);
+  const horizontal = node('line', {}, undefined, guides);
+  const markers = node('g', {class:'chart-markers', 'aria-hidden':'true'});
+  const targets = node('g', {});
+  const tooltip = el('div', undefined, 'chart-tooltip');
+  tooltip.id = 'publication-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.hidden = true;
+
+  const terms = dataset.terms.filter(t=>(state.term==='all' || String(t.id)===state.term)
+                                   && (state.topic==='all' || t.topic===state.topic));
+  const termLabel = terms.length===1 ? terms[0].phrase : state.topic==='all' ?
+    '正式17語の合計' : dataset.themes.find(t=>t.id===state.topic).label+'の合計';
+  const siteLabel = state.site==='all' ? null : dataset.sites.find(s=>s.id===state.site).label;
+  const dateLabel = state.grain==='day' ? '記事掲載日' : '記事掲載日（集計期間開始）';
+  const dayOf = row => row.date.length === 7 ? row.date+'-01' : row.date;
+  let active, pinned;
+  function hide() {
+    if (active) {
+      active.marker.classList.remove('active');
+      active.target.removeAttribute('aria-describedby');
     }
-    if (unknownStates.has(row.collectionState)) return;
-    const circle = node('circle', {cx:x, cy:yAt(row[key]), r:rows.length > 100 ? 2 : 4, fill:'#006b59'});
-    circle.setAttribute('role','button');
-    circle.setAttribute('tabindex','0');
-    circle.setAttribute('aria-label', `${row.date} の記事`);
-    circle.classList.add('chart-point');
-    circle.addEventListener('click', () => periodDrill(row.date));
-    circle.addEventListener('keydown', event => {
-      if (!['Enter',' '].includes(event.key)) return;
-      event.preventDefault();
-      periodDrill(row.date);
+    active = null;
+    tooltip.hidden = true;
+    guides.setAttribute('visibility','hidden');
+  }
+  function show(point) {
+    if (active===point) return;
+    hide();
+    active = point;
+    const {row,x,y,marker,target} = point;
+    marker.classList.add('active');
+    for (const [line, attrs] of [[vertical,{x1:x,x2:x,y1:top,y2:bottom}],
+                                 [horizontal,{x1:left,x2:right,y1:y,y2:y}]]) {
+      for (const [key,value] of Object.entries(attrs)) line.setAttribute(key,value);
+    }
+    guides.setAttribute('visibility','visible');
+    const details = [
+      el('strong', `${dateLabel}：${dayOf(row)}`),
+      el('div', `監視語句：${termLabel}`),
+      el('div', `出現回数：${fmt(row.occurrences)}回`),
+    ];
+    if (siteLabel) details.push(el('div', `媒体：${siteLabel}`));
+    if (terms.length > 1) {
+      const hits = terms.filter(t=>row.termOccurrences[t.id] > 0);
+      if (hits.length) {
+        const list = el('ul');
+        for (const term of hits) list.append(el('li', `${term.phrase}：${fmt(row.termOccurrences[term.id])}回`));
+        details.push(list);
+      }
+    }
+    tooltip.replaceChildren(...details);
+    tooltip.hidden = false;
+    const maxLeft = width - 4 - tooltip.offsetWidth;
+    const nextToPoint = x+13 <= maxLeft ? x+13 : x-tooltip.offsetWidth-13;
+    tooltip.style.left = `${Math.max(4, Math.min(maxLeft,nextToPoint))}px`;
+    tooltip.style.top = `${Math.max(4, Math.min(height-tooltip.offsetHeight-4, y-25))}px`;
+    target.setAttribute('aria-describedby', tooltip.id);
+  }
+
+  function toggle(point) {
+    if (pinned===point) {pinned=null; hide();}
+    else {pinned=point; show(point);}
+  }
+  svg.addEventListener('touchend',event=>{
+    const touch = event.changedTouches[0];
+    const bounds = svg.getBoundingClientRect();
+    const x = (touch.clientX - bounds.left) * width / bounds.width;
+    const y = (touch.clientY - bounds.top) * height / bounds.height;
+    if (y < top-10 || y > bottom+10) return;
+    const point = points.find(p=>x >= p.xStart && x <= p.xEnd);
+    if (!point) return;
+    event.preventDefault();
+    toggle(point);
+  }, {passive:false});
+
+  for (const [i,point] of points.entries()) {
+    const {row,index,x,y} = point;
+    point.marker = node('circle', {cx:x,cy:y,r:4.5,class:'chart-marker'}, undefined, markers);
+    const target = point.target = node('g', {
+      class:'chart-point', role:'button', tabindex:i===0 ? 0 : -1,
+      'aria-label':`${dateLabel} ${dayOf(row)}、${termLabel}、${fmt(row.occurrences)}回${siteLabel ? '、'+siteLabel : ''}`,
+    }, undefined, targets);
+    const xStart = point.xStart = index===0 ? left-12 : (xAt(index-1)+x)/2;
+    const xEnd = point.xEnd = index===rows.length-1 ? right+12 : (x+xAt(index+1))/2;
+    node('rect', {x:xStart,y:top-10,width:xEnd-xStart,height:bottom-top+20,fill:'transparent'}, undefined,target);
+    target.addEventListener('pointerenter',event=>{
+      if (event.pointerType==='touch') return;
+      if (pinned!==point) pinned=null;
+      show(point);
     });
-    const title = document.createElementNS(ns, 'title');
-    title.textContent = `${row.date}: ${row[key]}`;
-    circle.append(title);
-  });
-  $('chart').replaceChildren(svg);
+    target.addEventListener('pointerleave',()=>{if (!pinned && document.activeElement!==target) hide();});
+    target.addEventListener('focus',()=>{pinned=null; show(point);});
+    target.addEventListener('blur',()=>{if (!pinned) hide();});
+    target.addEventListener('click',event=>{
+      if (event.pointerType!=='touch') toggle(point);
+    });
+    target.addEventListener('keydown',event=>{
+      const keys = ['ArrowLeft','ArrowRight','Home','End','Escape','Enter',' '];
+      if (!keys.includes(event.key)) return;
+      event.preventDefault();
+      if (event.key==='Escape') {pinned=null; hide(); return;}
+      if (event.key==='Enter' || event.key===' ') {show(point); return;}
+      const next = {ArrowLeft:Math.max(0,i-1),ArrowRight:Math.min(points.length-1,i+1),
+                    Home:0,End:points.length-1}[event.key];
+      target.setAttribute('tabindex',-1);
+      points[next].target.setAttribute('tabindex',0);
+      points[next].target.focus();
+    });
+  }
+  chartContainer.replaceChildren(svg,tooltip);
+}
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(() => {
+    if (chartRows && measuredChartWidth()!==chartWidth) chart(chartRows);
+  }).observe(chartContainer);
 }
 const overviewSource = {
   rss_description:'RSS配信概要',html_meta_description:'HTMLメタ概要',
