@@ -23,7 +23,7 @@ export function resolveState(input,data,now=new Date()){
  const site=data.sites.some(s=>s.id===input.site)?input.site:'all';
  const term=data.terms.some(t=>String(t.id)===input.term)?input.term:'all';
  const topic=data.terms.some(t=>t.topic===input.topic)?input.topic:'all';
- return {preset,start,end,site,term,topic,route:['regular','openai','meltwater'].includes(input.route)?input.route:'all',grain:['day','week','month'].includes(input.grain)?input.grain:autoGrain(start,end),metric:input.metric==='occurrences'?'occurrences':'articles',axis:input.axis==='published'?'published':'first_seen',sort:['published','observed','occurrences'].includes(input.sort)?input.sort:'axis'};
+ return {preset,start,end,site,term,topic,route:['regular','openai','m_api'].includes(input.route)?input.route:'all',grain:['day','week','month'].includes(input.grain)?input.grain:autoGrain(start,end),metric:input.metric==='occurrences'?'occurrences':'articles',axis:input.axis==='published'?'published':'first_seen',sort:['published','observed','occurrences'].includes(input.sort)?input.sort:'axis'};
 }
 export function fromURL(search,data,now){return resolveState(Object.fromEntries(new URLSearchParams(search)),data,now);}
 export function toURL(state){return '?'+new URLSearchParams(state).toString();}
@@ -46,9 +46,9 @@ export function articleURL(value) {
 }
 
 export function includesRoute(row, route) {
- if (route==='regular') return !['openai','meltwater'].includes(row.discovery);
+ if (route==='regular') return !['openai','m_api'].includes(row.discovery);
  if (route==='openai') return ['openai','openai_multiple'].includes(row.discovery);
- if (route==='meltwater') return row.discovery==='meltwater' || row.meltwater_manual===true;
+ if (route==='m_api') return row.discovery==='m_api' || row.m_api_csv===true;
  return true;
 }
 export function aggregate(data,state){
@@ -125,7 +125,7 @@ export function aggregate(data,state){
  const sortField=state.sort==='published'?'published_day':state.sort==='observed'?'first_seen_at':axis;
  const occurrences=a=>a.matches.reduce((sum,m)=>sum+m.occurrences,0);
  const compareTime=(a,b,field)=>(b[field]||'').localeCompare(a[field]||'');
- const articles=rows.filter(a=>matching(a).length || (!filterMatch && a.meltwater_manual && a.id)).map(a=>({...a,matches:matching(a)}));
+ const articles=rows.filter(a=>matching(a).length || (!filterMatch && a.m_api_csv && a.id)).map(a=>({...a,matches:matching(a)}));
  articles.sort((a,b)=>(state.sort==='occurrences'?occurrences(b)-occurrences(a):0)
   || compareTime(a,b,sortField) || compareTime(a,b,'first_seen_at') || a.id.localeCompare(b.id));
  const unassignedPublication=counts(undated);

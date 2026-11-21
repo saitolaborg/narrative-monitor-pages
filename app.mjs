@@ -30,7 +30,7 @@ function external(text, value) {
 }
 const publicationBasis = {
   publisher_explicit:'原文・タイムゾーン明記', publisher_calendar:'原文の記載日',
-  meltwater_api:'Meltwater API提供日時・JST', meltwater_manual_calendar:'CSV記載日・タイムゾーン未確認',
+  m_api_timestamp:'M API提供日時・JST', m_api_csv_calendar:'M APIのCSV記載日・タイムゾーン未確認',
   rss_explicit:'RSS掲載日時', sitemap_explicit:'サイトマップ掲載日時', unknown:'根拠なし', conflict:'証拠の不一致',
 };
 
@@ -226,11 +226,11 @@ function articleCard(article) {
     card.append(el('span',dataset.terms.find(term=>term.id===id).phrase,'tag'));
   }
   card.append(
-    el('p',article.meltwater_manual && !article.body_ok && !article.matches.length
+    el('p',article.m_api_csv && !article.body_ok && !article.matches.length
       ? '本文一致未確認'
       : `出現 ${article.matches.reduce((sum,match)=>sum+match.occurrences,0)}回`),
     el('p',`記事掲載日 ${article.published_day || '未確認'}${article.publication_basis ? '（' + publicationBasis[article.publication_basis] + '）' : ''} ／ 初回観測 ${date(article.first_seen_at)}`),
-    el('p',`${article.meltwater_manual ? 'Meltwater手動CSV' : ({openai:'OpenAI補完',openai_multiple:'複数経路（OpenAIで初回発見）',multiple:'複数経路',meltwater:'Meltwaterで初回発見'})[article.discovery] || '通常収集'} ／ ${article.body_ok?'本文抽出済み':article.body_received?'部分テキスト':article.attempted?'本文取得・抽出未完了':'本文未確認'}`),
+    el('p',`${article.m_api_csv ? 'M API（手動CSV）' : ({openai:'OpenAI補完',openai_multiple:'複数経路（OpenAIで初回発見）',multiple:'複数経路',m_api:'M APIで初回発見'})[article.discovery] || '通常収集'} ／ ${article.body_ok?'本文抽出済み':article.body_received?'部分テキスト':article.attempted?'本文取得・抽出未完了':'本文未確認'}`),
     el('p',article.overview?.text || '概要未取得'),
   );
   if (article.body_fetched_at) card.append(el('p',`直近の本文取得成功 ${date(article.body_fetched_at)}`));
@@ -307,7 +307,7 @@ for (const row of [...dataset.cohorts, ...dataset.articles]) {
   const key = row.published_day.slice(0, 7) + ' ' + row.site;
   monthly.set(key, (monthly.get(key) || 0) + row.count);
 }
-const progressRows = ['openai','meltwater'].includes(state.route) ? [] : dataset.backfill_months || [];
+const progressRows = ['openai','m_api'].includes(state.route) ? [] : dataset.backfill_months || [];
 const backfill = new Map(progressRows.map(row => [row.month + ' ' + row.site, row]));
 const progressCells = progress => [
   progress?.candidates ?? '—', progress?.pending ?? '—', progress?.extracted ?? '—',
