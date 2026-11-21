@@ -18,6 +18,7 @@ function drill(changes) {
 function periodDrill(period) {
   drill(drillPeriod(period, state));
 }
+const unknownStates = new Set(['no_run','failed','unjudged']);
 function external(text, value) {
   const url = articleURL(value);
   if (!url) return el('span', text);
@@ -57,7 +58,7 @@ function chart(rows, metric) {
     segment = [];
   }
   rows.forEach((row, index) => {
-    if (['no_run','failed'].includes(row.collectionState)) flush();
+    if (unknownStates.has(row.collectionState)) flush();
     else segment.push(`${xAt(index)},${yAt(row[key])}`);
   });
   flush();
@@ -69,7 +70,7 @@ function chart(rows, metric) {
       node('text', {x, y:275, class:first || last ? 'end-date' : 'intermediate-date',
         'text-anchor':first ? 'start' : last ? 'end' : 'middle'}, row.date);
     }
-    if (['no_run','failed'].includes(row.collectionState)) return;
+    if (unknownStates.has(row.collectionState)) return;
     const circle = node('circle', {cx:x, cy:yAt(row[key]), r:rows.length > 100 ? 2 : 4, fill:'#006b59'});
     circle.setAttribute('role','button');
     circle.setAttribute('tabindex','0');
@@ -105,13 +106,17 @@ function articleCard(article) {
   card.append(
     el('p',`出現 ${article.matches.reduce((sum,match)=>sum+match.occurrences,0)}回`),
     el('p',`記載公開日時 ${date(article.published_at)}${article.publication_timezone_assumed?'（タイムゾーン仮定あり）':''} ／ 初回観測 ${date(article.first_seen_at)}`),
-    el('p',`${({openai:'OpenAI補完',openai_multiple:'複数経路（OpenAIで初回発見）',multiple:'複数経路'})[article.discovery] || '通常収集'} ／ ${article.body_ok?'本文抽出済み':article.body_received?'部分テキスト':'本文未確認'}`),
+    el('p',`${({openai:'OpenAI補完',openai_multiple:'複数経路（OpenAIで初回発見）',multiple:'複数経路',meltwater:'Meltwaterで初回発見'})[article.discovery] || '通常収集'} ／ ${article.body_ok?'本文抽出済み':article.body_received?'部分テキスト':article.attempted?'本文取得・抽出未完了':'本文未確認'}`),
     el('p',article.overview?.text || '概要未取得'),
   );
+  if (article.body_fetched_at) card.append(el('p',`直近の本文取得成功 ${date(article.body_fetched_at)}`));
   if (!article.published_at && article.published_raw) {
     card.append(el('small','保存された日時の表記 '+article.published_raw));
   }
   if (article.overview?.text) card.append(el('small',overviewSource[article.overview.source]));
+  const original = external('原文を開く',article.url);
+  original.className = 'original-link';
+  card.append(original);
   const source = external(article.url,article.url);
   source.className = 'print-source';
   card.append(source);
@@ -120,12 +125,12 @@ function articleCard(article) {
 function renderArticles(print = false) {
   const offset = print ? 0 : articlePage * articlePageSize;
   const end = print ? articles.length : Math.min(offset + articlePageSize, articles.length);
-  $('article-count').textContent = articles.length ? `${fmt(offset+1)}–${fmt(end)}件 / 全${fmt(articles.length)}件` : '0件';
+  $('article-count').textContent = articles.length ? `${fmt(offset+1)}–${fmt(end)}件 / 全${fmt(articles.length)}件` : '';
   $('article-pages').hidden = print || articles.length <= articlePageSize;
   $('previous').disabled = articlePage === 0;
   $('next').disabled = end === articles.length;
   $('articles').replaceChildren(...(articles.length ? articles.slice(offset,end).map(articleCard)
-    : [el('p','選択条件に一致する保存済み記事は0件です。','empty')]));
+    : [el('p','選択条件で一致を確認できた記事はありません。','empty')]));
 }
 function renderThemes() {
   const open = new Set([...$('theme-groups').querySelectorAll('details[open]')].map(group=>group.dataset.theme));
@@ -159,10 +164,11 @@ function matrixButton(site,cell) {
   return button;
 }
 function render(){const result=aggregate(dataset,state);$('error').hidden=true;$('loading').hidden=true;$('content').hidden=false;
-for(const k of ['start','end','site','term','topic','grain','metric','axis','route'])$(k).value=state[k];
+for(const k of ['start','end','site','term','topic','grain','metric','axis','route','sort'])$(k).value=state[k];
 for(const b of $('presets').children)b.setAttribute('aria-pressed',String(b.dataset.preset===state.preset));
 $('updated').textContent=date(dataset.metadata.generated_at_jst);$('latest').textContent='選択媒体・期間終端までの最新収集成功: '+date(result.latestSuccess);
-$('period-note').textContent = `${state.start} 〜 ${state.end}（JST）`;
+$('period-note').textContent = `${state.start} 〜 ${state.end}（JST・${state.axis==='published'?'記載公開日':'初回観測日'}）`;
+$('clear-filters').disabled = ['site','term','topic','route'].every(key=>state[key]==='all');
 const selectedLabel = id => $(id).selectedOptions[0].textContent;
 $('print-filters').textContent = [
   $('period-note').textContent,
@@ -179,11 +185,11 @@ for (const row of [...dataset.cohorts, ...dataset.articles]) {
   const key = row.published_day.slice(0, 7) + ' ' + row.site;
   monthly.set(key, (monthly.get(key) || 0) + row.count);
 }
-const progressRows = state.route === 'openai' ? [] : dataset.backfill_months || [];
+const progressRows = ['openai','meltwater'].includes(state.route) ? [] : dataset.backfill_months || [];
 const backfill = new Map(progressRows.map(row => [row.month + ' ' + row.site, row]));
 const progressCells = progress => [
   progress?.candidates ?? '—', progress?.pending ?? '—', progress?.extracted ?? '—',
-  progress?.forbidden ?? '—',
+  progress?.failed ?? '—', progress?.forbidden ?? '—',
   progress?.attempted ? pct(100 * progress.extracted / progress.attempted) : '—',
 ];
 const months = [];
@@ -203,20 +209,22 @@ for (const row of progressRows.filter(row => row.month === null)) {
   months.push(['日付不明', result.sites.find(site => site.id === row.site)?.label || row.site,
     '—', ...progressCells(row)]);
 }
-table('monthly-coverage', ['月（JST）', '媒体', '公開月別の保存記事', '遡及候補', '未処理・再試行', '本文成功', '取得禁止', '本文成功率'], months);
+table('monthly-coverage', ['月（JST）', '媒体', '公開月別の保存記事', '遡及候補', '未処理・再試行', '本文成功', '未成功', '取得禁止', '本文成功率'], months);
 const s = result.summary;
+const matchValue = n => n || result.matchingKnown ? n : null;
 $('metrics').replaceChildren(...[
-  ['一致記事数', s.matched], ['出現回数', s.occurrences], ['観測記事数', s.observed],
-  ['収集媒体数', result.sites.filter(site => site.observed > 0).length],
-
-].map(([label, n]) => {
+  ['発見・観測記事数', s.observed, '同じURLは1記事'],
+  ['一致確認済み記事数', matchValue(s.matched), '保存した一致証拠がある記事'],
+  ['確認済み出現回数', matchValue(s.occurrences), '記事・語句・照合箇所ごとの集計'],
+  ['本文未確認記事数', s.unjudged, `未試行 ${fmt(s.unattempted)} ／ 試行済み・未成功 ${fmt(s.attemptedUnresolved)}`],
+].map(([label, n, definition]) => {
   const box = el('div', undefined, 'metric');
-  box.append(el('span', label), el('strong', fmt(n)));
+  box.append(el('span', label), el('strong', fmt(n)), el('small', definition));
   return box;
 }));
 $('scope').textContent=`${dataset.metadata.state_definition} ${state.term!=='all'||state.topic!=='all'?'語句・テーマ指定中の観測母数は、その条件で一致が確認できた記事に限定します。':''} 公開日時不明: ${fmt(result.unknownPublication)}記事（選択媒体・語句条件、期間には帰属できません）。HTTP取得成功率 ${pct(s.httpRate)} ／ 抽出成功率 ${pct(s.extractRate)} ／ 累積取得試行 ${fmt(s.attempts)}件。本文対象外 ${fmt(s.bodyNA)}記事。`;
 $('chart-label').textContent=(state.metric==='articles'?'一致記事数':'出現回数')+' · '+({day:'日別',week:'週別',month:'月別'}[state.grain]);chart(result.series,state.metric);
-table('series-table',['JST期間開始','保存観測状態','一致記事数','出現回数'],result.series.map(r=>[action(r.date,()=>periodDrill(r.date)),({saved:'保存記事あり',observed_zero:'保存確認・観測0',failed:'収集失敗',no_run:'runなし／欠測未確認'}[r.collectionState]),['no_run','failed'].includes(r.collectionState)?'未確認':fmt(r.matched),['no_run','failed'].includes(r.collectionState)?'未確認':fmt(r.occurrences)]));
+table('series-table',['JST期間開始','保存観測状態','一致記事数','出現回数'],result.series.map(r=>[action(r.date,()=>periodDrill(r.date)),({saved:'保存記事あり',observed_zero:'保存確認・観測0',failed:'収集失敗',no_run:'runなし／欠測未確認',unjudged:'発見済み・一致未確認'}[r.collectionState]),unknownStates.has(r.collectionState)?'未確認':fmt(r.matched),unknownStates.has(r.collectionState)?'未確認':fmt(r.occurrences)]));
 renderThemes();
 table('matrix',['媒体',...dataset.themes.map(theme=>theme.label)],result.matrix.map(({site,cells})=>[
   action(site.label,()=>drill({site:site.id})),
@@ -249,7 +257,8 @@ for(const [value,label] of [['7','直近7日'],['30','直近30日'],['90','直�
 });$('presets').append(b);}
 $('filters').addEventListener('submit',event=>{event.preventDefault();apply({...state,...Object.fromEntries(['start','end','site','term','topic','grain','metric','axis','route'].map(k=>[k,$(k).value]))});});
 for(const id of ['start','end'])$(id).addEventListener('change',()=>apply({...state,preset:'custom',start:$('start').value,end:$('end').value,grain:undefined}));
-for(const id of ['site','term','topic','grain','metric','axis','route'])$(id).addEventListener('change',()=>apply({...state,[id]:$(id).value}));
+for(const id of ['site','term','topic','grain','metric','axis','route','sort'])$(id).addEventListener('change',()=>apply({...state,[id]:$(id).value}));
+$('clear-filters').addEventListener('click',()=>apply({...state,site:'all',term:'all',topic:'all',route:'all'}));
 $('previous').addEventListener('click', () => { articlePage--; renderArticles(); });
 $('next').addEventListener('click', () => { articlePage++; renderArticles(); });
 $('clear-theme').addEventListener('click',()=>apply({...state,term:'all',topic:'all'}));
