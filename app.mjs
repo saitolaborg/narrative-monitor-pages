@@ -104,9 +104,11 @@ function articleCard(article) {
     card.append(el('span',dataset.terms.find(term=>term.id===id).phrase,'tag'));
   }
   card.append(
-    el('p',`出現 ${article.matches.reduce((sum,match)=>sum+match.occurrences,0)}回`),
+    el('p',article.meltwater_manual && !article.body_ok && !article.matches.length
+      ? '本文一致未確認'
+      : `出現 ${article.matches.reduce((sum,match)=>sum+match.occurrences,0)}回`),
     el('p',`記載公開日時 ${date(article.published_at)}${article.publication_timezone_assumed?'（タイムゾーン仮定あり）':''} ／ 初回観測 ${date(article.first_seen_at)}`),
-    el('p',`${({openai:'OpenAI補完',openai_multiple:'複数経路（OpenAIで初回発見）',multiple:'複数経路',meltwater:'Meltwaterで初回発見'})[article.discovery] || '通常収集'} ／ ${article.body_ok?'本文抽出済み':article.body_received?'部分テキスト':article.attempted?'本文取得・抽出未完了':'本文未確認'}`),
+    el('p',`${article.meltwater_manual ? 'Meltwater手動CSV' : ({openai:'OpenAI補完',openai_multiple:'複数経路（OpenAIで初回発見）',multiple:'複数経路',meltwater:'Meltwaterで初回発見'})[article.discovery] || '通常収集'} ／ ${article.body_ok?'本文抽出済み':article.body_received?'部分テキスト':article.attempted?'本文取得・抽出未完了':'本文未確認'}`),
     el('p',article.overview?.text || '概要未取得'),
   );
   if (article.body_fetched_at) card.append(el('p',`直近の本文取得成功 ${date(article.body_fetched_at)}`));

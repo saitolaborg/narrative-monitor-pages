@@ -48,7 +48,7 @@ export function articleURL(value) {
 export function includesRoute(row, route) {
  if (route==='regular') return !['openai','meltwater'].includes(row.discovery);
  if (route==='openai') return ['openai','openai_multiple'].includes(row.discovery);
- if (route==='meltwater') return row.discovery==='meltwater';
+ if (route==='meltwater') return row.discovery==='meltwater' || row.meltwater_manual===true;
  return true;
 }
 export function aggregate(data,state){
@@ -112,7 +112,7 @@ export function aggregate(data,state){
  const sortField=state.sort==='published'?'published_at':state.sort==='observed'?'first_seen_at':axis;
  const occurrences=a=>a.matches.reduce((sum,m)=>sum+m.occurrences,0);
  const compareTime=(a,b,field)=>(b[field]||'').localeCompare(a[field]||'');
- const articles=rows.filter(a=>matching(a).length).map(a=>({...a,matches:matching(a)}));
+ const articles=rows.filter(a=>matching(a).length || (!filterMatch && a.meltwater_manual && a.id)).map(a=>({...a,matches:matching(a)}));
  articles.sort((a,b)=>(state.sort==='occurrences'?occurrences(b)-occurrences(a):0)
   || compareTime(a,b,sortField) || compareTime(a,b,'first_seen_at') || a.id.localeCompare(b.id));
  return {summary:counts(rows),unknownPublication:unknown,series,sites,terms,topics,matrix,articles,
