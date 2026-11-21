@@ -228,9 +228,11 @@ $('metrics').replaceChildren(...[
   box.append(el('span', label), el('strong', fmt(n)), el('small', definition));
   return box;
 }));
-$('scope').textContent=`${dataset.metadata.state_definition} ${state.term!=='all'||state.topic!=='all'?'語句・テーマ指定中の観測母数は、その条件で一致が確認できた記事に限定します。':''} 公開日時不明: ${fmt(result.unknownPublication)}記事（選択媒体・語句条件、期間には帰属できません）。HTTP取得成功率 ${pct(s.httpRate)} ／ 抽出成功率 ${pct(s.extractRate)} ／ 累積取得試行 ${fmt(s.attempts)}件。本文対象外 ${fmt(s.bodyNA)}記事。`;
+$('scope').textContent=`${dataset.metadata.state_definition} ${state.term!=='all'||state.topic!=='all'?'語句・テーマ指定中の観測母数は、その条件で一致が確認できた記事に限定します。':''} HTTP取得成功率 ${pct(s.httpRate)} ／ 抽出成功率 ${pct(s.extractRate)} ／ 累積取得試行 ${fmt(s.attempts)}件。本文対象外 ${fmt(s.bodyNA)}記事。`;
 $('chart-label').textContent='記事掲載日基準 · 出現回数 · '+({day:'日別',week:'週別',month:'月別'}[state.grain]);
 chart(result.publicationSeries);
+const undated = result.unassignedPublication;
+$('publication-unassigned').textContent = `掲載日不明・矛盾 ${fmt(undated.observed)}記事 ／ 保存済み一致 ${fmt(undated.matched)}記事・${fmt(undated.occurrences)}回（選択中の媒体・語句・発見経路。期間に割り当てられません）`;
 table('series-table',['掲載日・集計期間開始','保存記事の状態','出現回数'],result.publicationSeries.map(r=>[
   action(r.date,()=>periodDrill(r.date)),
   ({saved:'保存記事あり',no_run:'掲載記事の保存未確認',unjudged:'発見済み・一致未確認'})[r.collectionState],

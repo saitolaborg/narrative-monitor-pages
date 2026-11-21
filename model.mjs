@@ -58,7 +58,7 @@ export function aggregate(data,state){
  const all = [...data.cohorts,...data.articles].filter(a=>(state.site==='all'||a.site===state.site)&&includesRoute(a,state.route));
  const population=all.filter(a=>!filterMatch||matching(a).length);
  const axis=state.axis==='published'?'published_day':'first_seen_day';
- const unknown=population.filter(a=>!a.published_day).reduce((n,a)=>n+a.count,0);
+ const undated=population.filter(a=>!a.published_day);
  const inPeriod = a => a[axis] && a[axis]>=state.start && a[axis]<=state.end;
  const rows=population.filter(inPeriod);
  const coverageRows=all.filter(inPeriod);
@@ -124,7 +124,9 @@ export function aggregate(data,state){
  const articles=rows.filter(a=>matching(a).length || (!filterMatch && a.meltwater_manual && a.id)).map(a=>({...a,matches:matching(a)}));
  articles.sort((a,b)=>(state.sort==='occurrences'?occurrences(b)-occurrences(a):0)
   || compareTime(a,b,sortField) || compareTime(a,b,'first_seen_at') || a.id.localeCompare(b.id));
- return {summary:counts(rows),unknownPublication:unknown,series,publicationSeries,sites,terms,topics,matrix,articles,
+ const unassignedPublication=counts(undated);
+ return {summary:counts(rows),unassignedPublication,unknownPublication:unassignedPublication.observed,
+  series,publicationSeries,sites,terms,topics,matrix,articles,
   matchingKnown:series.some(row=>['saved','observed_zero'].includes(row.collectionState)),
   latestSuccess:sites.map(s=>s.latestPeriodSuccess).filter(Boolean).sort().at(-1)||null};
 }
