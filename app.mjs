@@ -16,7 +16,7 @@ function drill(changes) {
   $('results-heading').focus();
 }
 function periodDrill(period) {
-  drill(drillPeriod(period, state));
+  drill({...drillPeriod(period, state),axis:'published'});
 }
 const unknownStates = new Set(['no_run','failed','unjudged']);
 function external(text, value) {
@@ -28,11 +28,17 @@ function external(text, value) {
   link.rel = 'noopener noreferrer';
   return link;
 }
-function chart(rows, metric) {
+const publicationBasis = {
+  publisher_explicit:'原文・タイムゾーン明記', publisher_calendar:'原文の記載日',
+  meltwater_api:'Meltwater API提供日時・JST', meltwater_manual_calendar:'CSV記載日・タイムゾーン未確認',
+  rss_explicit:'RSS掲載日時', sitemap_explicit:'サイトマップ掲載日時', unknown:'根拠なし', conflict:'証拠の不一致',
+};
+
+function chart(rows) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', '0 0 1100 290');
-  const key = metric === 'articles' ? 'matched' : 'occurrences';
+  const key = 'occurrences';
   const maximum = Math.max(1, ...rows.map(row => row[key]));
   const ticks = Math.min(4, maximum);
   const step = Math.ceil(maximum / ticks);
@@ -107,7 +113,7 @@ function articleCard(article) {
     el('p',article.meltwater_manual && !article.body_ok && !article.matches.length
       ? '本文一致未確認'
       : `出現 ${article.matches.reduce((sum,match)=>sum+match.occurrences,0)}回`),
-    el('p',`記載公開日時 ${date(article.published_at)}${article.publication_timezone_assumed?'（タイムゾーン仮定あり）':''} ／ 初回観測 ${date(article.first_seen_at)}`),
+    el('p',`記事掲載日 ${article.published_day || '未確認'}${article.publication_basis ? '（' + publicationBasis[article.publication_basis] + '）' : ''} ／ 初回観測 ${date(article.first_seen_at)}`),
     el('p',`${article.meltwater_manual ? 'Meltwater手動CSV' : ({openai:'OpenAI補完',openai_multiple:'複数経路（OpenAIで初回発見）',multiple:'複数経路',meltwater:'Meltwaterで初回発見'})[article.discovery] || '通常収集'} ／ ${article.body_ok?'本文抽出済み':article.body_received?'部分テキスト':article.attempted?'本文取得・抽出未完了':'本文未確認'}`),
     el('p',article.overview?.text || '概要未取得'),
   );
@@ -166,20 +172,18 @@ function matrixButton(site,cell) {
   return button;
 }
 function render(){const result=aggregate(dataset,state);$('error').hidden=true;$('loading').hidden=true;$('content').hidden=false;
-for(const k of ['start','end','site','term','topic','grain','metric','axis','route','sort'])$(k).value=state[k];
+for(const k of ['start','end','site','term','topic','grain','axis','route','sort'])$(k).value=state[k];
 for(const b of $('presets').children)b.setAttribute('aria-pressed',String(b.dataset.preset===state.preset));
 $('updated').textContent=date(dataset.metadata.generated_at_jst);$('latest').textContent='選択媒体・期間終端までの最新収集成功: '+date(result.latestSuccess);
-$('period-note').textContent = `${state.start} 〜 ${state.end}（JST・${state.axis==='published'?'記載公開日':'初回観測日'}）`;
+$('period-note').textContent = `${state.start} 〜 ${state.end}（${state.axis==='published'?'記事掲載日':'初回観測日・JST'}）`;
 $('clear-filters').disabled = ['site','term','topic','route'].every(key=>state[key]==='all');
 const selectedLabel = id => $(id).selectedOptions[0].textContent;
 $('print-filters').textContent = [
   $('period-note').textContent,
   selectedLabel('site'), selectedLabel('term'), selectedLabel('topic'),
-  selectedLabel('route'), selectedLabel('axis'), selectedLabel('grain'), selectedLabel('metric'),
+  selectedLabel('route'), selectedLabel('axis'), selectedLabel('grain'),
 ].join(' ／ ');
-$('axis-note').textContent = state.axis === 'published'
-  ? '記載公開日時が分かる保存記事を集計します。'
-  : '初回観測日で集計します。遡及収集した記事も発見日に計上されます。';
+$('axis-note').textContent = '記事掲載日基準で、保存済みの正式17語の出現回数を集計しています。掲載日不明・矛盾の記事はグラフに含めません。';
 const monthly = new Map();
 for (const row of [...dataset.cohorts, ...dataset.articles]) {
   if (!includesRoute(row,state.route) || !row.published_day || row.published_day < state.start || row.published_day > state.end
@@ -225,8 +229,13 @@ $('metrics').replaceChildren(...[
   return box;
 }));
 $('scope').textContent=`${dataset.metadata.state_definition} ${state.term!=='all'||state.topic!=='all'?'語句・テーマ指定中の観測母数は、その条件で一致が確認できた記事に限定します。':''} 公開日時不明: ${fmt(result.unknownPublication)}記事（選択媒体・語句条件、期間には帰属できません）。HTTP取得成功率 ${pct(s.httpRate)} ／ 抽出成功率 ${pct(s.extractRate)} ／ 累積取得試行 ${fmt(s.attempts)}件。本文対象外 ${fmt(s.bodyNA)}記事。`;
-$('chart-label').textContent=(state.metric==='articles'?'一致記事数':'出現回数')+' · '+({day:'日別',week:'週別',month:'月別'}[state.grain]);chart(result.series,state.metric);
-table('series-table',['JST期間開始','保存観測状態','一致記事数','出現回数'],result.series.map(r=>[action(r.date,()=>periodDrill(r.date)),({saved:'保存記事あり',observed_zero:'保存確認・観測0',failed:'収集失敗',no_run:'runなし／欠測未確認',unjudged:'発見済み・一致未確認'}[r.collectionState]),unknownStates.has(r.collectionState)?'未確認':fmt(r.matched),unknownStates.has(r.collectionState)?'未確認':fmt(r.occurrences)]));
+$('chart-label').textContent='記事掲載日基準 · 出現回数 · '+({day:'日別',week:'週別',month:'月別'}[state.grain]);
+chart(result.publicationSeries);
+table('series-table',['掲載日・集計期間開始','保存記事の状態','出現回数'],result.publicationSeries.map(r=>[
+  action(r.date,()=>periodDrill(r.date)),
+  ({saved:'保存記事あり',no_run:'掲載記事の保存未確認',unjudged:'発見済み・一致未確認'})[r.collectionState],
+  unknownStates.has(r.collectionState)?'未確認':fmt(r.occurrences),
+]));
 renderThemes();
 table('matrix',['媒体',...dataset.themes.map(theme=>theme.label)],result.matrix.map(({site,cells})=>[
   action(site.label,()=>drill({site:site.id})),
@@ -257,9 +266,9 @@ for(const [value,label] of [['7','直近7日'],['30','直近30日'],['90','直�
   if (value === 'custom') $('start').closest('details').open = true;
   apply({...state, preset:value, grain:undefined});
 });$('presets').append(b);}
-$('filters').addEventListener('submit',event=>{event.preventDefault();apply({...state,...Object.fromEntries(['start','end','site','term','topic','grain','metric','axis','route'].map(k=>[k,$(k).value]))});});
+$('filters').addEventListener('submit',event=>{event.preventDefault();apply({...state,...Object.fromEntries(['start','end','site','term','topic','grain','axis','route'].map(k=>[k,$(k).value]))});});
 for(const id of ['start','end'])$(id).addEventListener('change',()=>apply({...state,preset:'custom',start:$('start').value,end:$('end').value,grain:undefined}));
-for(const id of ['site','term','topic','grain','metric','axis','route','sort'])$(id).addEventListener('change',()=>apply({...state,[id]:$(id).value}));
+for(const id of ['site','term','topic','grain','axis','route','sort'])$(id).addEventListener('change',()=>apply({...state,[id]:$(id).value}));
 $('clear-filters').addEventListener('click',()=>apply({...state,site:'all',term:'all',topic:'all',route:'all'}));
 $('previous').addEventListener('click', () => { articlePage--; renderArticles(); });
 $('next').addEventListener('click', () => { articlePage++; renderArticles(); });

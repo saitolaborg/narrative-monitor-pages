@@ -20,16 +20,15 @@
 <details><summary>期間・集計設定</summary><div class="controls">
 <label>開始日<input id="start" type="date" required></label><label>終了日<input id="end" type="date" required></label>
 <label>集計粒度<select id="grain"><option value="day">日単位</option><option value="week">週単位（月曜開始）</option><option value="month">月単位</option></select></label>
-<label>指標<select id="metric"><option value="articles">ユニーク一致記事数</option><option value="occurrences">語句の出現回数</option></select></label>
-<label>時間軸<select id="axis"><option value="first_seen">初回観測日時</option><option value="published">記載公開日時</option></select></label>
+<label>集計・記事一覧の日付軸<select id="axis"><option value="first_seen">初回観測日時</option><option value="published">記載公開日時</option></select></label>
 <button type="submit" class="apply">条件を適用</button></div><button id="fixed-link" type="button" class="text-button">期間を固定したURLにする</button></details></form>
 <p id="error" role="alert" hidden></p>
 <div id="loading" role="status">保存済み観測データを読み込んでいます。</div>
 <div id="content" hidden>
 <section class="metrics" id="metrics" aria-label="選択期間の概要"></section>
 <section class="panel"><div class="section-heading"><h2>語句の出現推移</h2><span id="chart-label"></span></div>
-<div id="chart" aria-label="選択条件による時系列グラフ"></div>
-<p class="note"><span id="axis-note"></span> 空白は観測未確認です。</p>
+<div id="chart" aria-label="記事掲載日基準の語句出現回数"></div>
+<p class="note"><span id="axis-note"></span> 空白はその期間の掲載記事・一致証拠が未確認です。</p>
 <details><summary>時系列データ</summary><div class="scroll" id="series-table"></div></details></section>
 <section class="panel"><div class="section-heading"><h2>監視テーマ・キーワード</h2><button id="clear-theme" type="button">語句・テーマを解除</button></div><div id="theme-groups"></div></section>
 <section class="panel"><h2>媒体 × テーマ</h2><p class="note">期間内の一致記事数。複数テーマに一致する記事は各列に1件ずつ表示します。— は観測未確認です。</p><div class="scroll" id="matrix"></div></section>

@@ -83,6 +83,15 @@ export function aggregate(data,state){
  const series=[...time].map(([date,items])=>{const runs=selectedRuns.filter(r=>bucket(jstDay(new Date(r.started_at)),state.grain)===date);
  const collectionState=items.some(confirmed)?'saved':items.length?'unjudged':axis==='first_seen_day' && runs.some(r=>r.confirmed&&r.matching_observed)?'observed_zero':runs.some(r=>r.status==='failed')?'failed':'no_run';
  return {date,collectionState,...counts(filterMatch ? items.filter(a=>matching(a).length) : items)};});
+ const publishedBuckets=new Map([...time.keys()].map(day=>[day,[]]));
+ for(const article of coverageRows) {
+  const day=article.published_day;
+  if(day && day>=state.start && day<=state.end) publishedBuckets.get(bucket(day,state.grain)).push(article);
+ }
+ const publicationSeries=[...publishedBuckets].map(([date,items])=>{
+  const collectionState=items.some(confirmed)?'saved':items.length?'unjudged':'no_run';
+  return {date,collectionState,...counts(items)};
+ });
  const sites=data.sites.filter(s=>state.site==='all'||s.id===state.site).map(s=>{
   const items=rows.filter(a=>a.site===s.id),sourceRuns=canUseRuns?s.runs:[],runs=sourceRuns.filter(r=>jstDay(new Date(r.started_at))>=state.start&&jstDay(new Date(r.started_at))<=state.end);
   const saved=runs.filter(r=>r.confirmed),latest=sourceRuns.filter(r=>r.confirmed&&r.matching_observed&&r.status==='complete'&&r.finished_at&&jstDay(new Date(r.finished_at))<=state.end).map(r=>r.finished_at).sort().at(-1)||null;
@@ -109,13 +118,13 @@ export function aggregate(data,state){
   const tids=new Set(data.terms.filter(t=>t.topic===topic).map(t=>t.id));
   return {topic,...counts(rows.map(a=>({...a,matches:(a.matches||[]).filter(m=>tids.has(m.term_id)&&selectedTerms.has(m.term_id))})))};
  });
- const sortField=state.sort==='published'?'published_at':state.sort==='observed'?'first_seen_at':axis;
+ const sortField=state.sort==='published'?'published_day':state.sort==='observed'?'first_seen_at':axis;
  const occurrences=a=>a.matches.reduce((sum,m)=>sum+m.occurrences,0);
  const compareTime=(a,b,field)=>(b[field]||'').localeCompare(a[field]||'');
  const articles=rows.filter(a=>matching(a).length || (!filterMatch && a.meltwater_manual && a.id)).map(a=>({...a,matches:matching(a)}));
  articles.sort((a,b)=>(state.sort==='occurrences'?occurrences(b)-occurrences(a):0)
   || compareTime(a,b,sortField) || compareTime(a,b,'first_seen_at') || a.id.localeCompare(b.id));
- return {summary:counts(rows),unknownPublication:unknown,series,sites,terms,topics,matrix,articles,
+ return {summary:counts(rows),unknownPublication:unknown,series,publicationSeries,sites,terms,topics,matrix,articles,
   matchingKnown:series.some(row=>['saved','observed_zero'].includes(row.collectionState)),
   latestSuccess:sites.map(s=>s.latestPeriodSuccess).filter(Boolean).sort().at(-1)||null};
 }
