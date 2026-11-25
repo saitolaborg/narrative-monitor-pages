@@ -7,6 +7,35 @@
 <link rel="stylesheet" href="./styles.css"><script type="module" src="./app.mjs"></script></head>
 <body><header><h1>Narrative Monitor</h1><div class="updated">データ生成（JST） <strong id="updated">読込中</strong></div></header>
 <main>
+<nav id="monitor-tabs" class="panel monitor-tabs" aria-label="ダッシュボード" hidden>
+<button type="button" id="china-tab" aria-pressed="true" aria-controls="china-panel">中国メディア</button>
+<button type="button" id="x-tab" aria-pressed="false" aria-controls="x-panel">日本語X投稿動向</button>
+</nav>
+<section id="x-panel" class="panel" aria-labelledby="x-heading" hidden>
+<div class="section-heading"><h2 id="x-heading">日本語X投稿動向</h2><span>データソース　M API</span></div>
+<p id="x-updated"></p>
+<div class="controls">
+<label>開始日<input id="x-start" type="date"></label>
+<label>終了日<input id="x-end" type="date"></label>
+<label>スケール<select id="x-scale"><option value="linear">線形</option><option value="log">対数（log₁₀（1＋値））</option></select></label>
+<label>表示値<select id="x-comparison"><option value="x">日本語X件数</option><option value="raw">中国メディアと比較（実数）</option><option value="normalized">中国メディアと比較（最大値＝100）</option></select></label>
+</div>
+<details><summary>監視語を選択</summary>
+<div class="x-selection">
+<button type="button" id="x-select-all">全選択</button>
+<button type="button" id="x-select-none">全解除</button>
+</div><fieldset id="x-terms" class="x-term-grid"><legend>複数選択できます</legend></fieldset></details>
+<p id="x-status" role="status"></p>
+<p id="x-comparison-note" class="note"></p>
+<div id="x-chart"></div>
+<div id="x-inspector" hidden><label for="x-day">日付を選んで内訳を確認</label>
+<input id="x-day" type="range" min="0" value="0">
+<output id="x-day-counts" for="x-day"></output></div>
+<div class="x-legend" id="x-legend"></div>
+<details id="x-table-details"><summary>日別データ</summary><div class="scroll" id="x-table"></div></details>
+<ul id="x-limitations" class="note"></ul>
+</section>
+<div id="china-panel">
 <section class="print-context" aria-label="印刷条件"><p id="print-filters"></p><p id="print-url"></p><p id="printed-at"></p></section>
 <form id="filters" class="panel filters"><div class="preset-row" id="presets" aria-label="期間プリセット"></div>
 <p id="period-note" aria-live="polite"></p>
@@ -38,4 +67,4 @@
 <div id="articles"></div><nav id="article-pages" aria-label="記事ページ" hidden><button id="previous" type="button">前へ</button><button id="next" type="button">次へ</button></nav></section>
 <section class="panel"><h2>監視対象媒体と収集状況</h2><p id="latest"></p><div class="scroll" id="sites"></div></section>
 <details class="limits"><summary>媒体別・月別の保存状況</summary><p class="note">媒体全体の月別集計。遡及候補の月にはURLの日付を含むため、記載公開月とは異なる場合があります。候補数は登録できた範囲で、網羅率は未確認です。</p><div class="scroll" id="monthly-coverage"></div></details>
-<details class="limits"><summary>観測の範囲と限界</summary><p class="note" id="scope"></p><ul id="limits"></ul><p>正式辞書 <code id="version"></code></p><p id="dictionary"></p></details></div></main></body></html>
+<details class="limits"><summary>観測の範囲と限界</summary><p class="note" id="scope"></p><ul id="limits"></ul><p>正式辞書 <code id="version"></code></p><p id="dictionary"></p></details></div></div></main></body></html>

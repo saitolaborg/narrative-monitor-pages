@@ -134,3 +134,50 @@ export function aggregate(data,state){
   matchingKnown:series.some(row=>['saved','observed_zero'].includes(row.collectionState)),
   latestSuccess:sites.map(s=>s.latestPeriodSuccess).filter(Boolean).sort().at(-1)||null};
 }
+
+// Compare Japanese X counts with Chinese media occurrences on publication days.
+export function japaneseXSeries(data, start, end, selected, comparison) {
+  const dates = [];
+  for (let day = new Date(start + 'T00:00:00Z'); day <= new Date(end + 'T00:00:00Z'); day.setUTCDate(day.getUTCDate() + 1)) {
+    dates.push(day.toISOString().slice(0,10));
+  }
+  const chinese = new Map(), observed = new Set();
+  if (comparison !== 'x') {
+    const chineseIds = new Set(data.japanese_x.terms
+      .filter(term => selected.has(term.id) && term.chinese_term_id !== null).map(term => term.chinese_term_id));
+    if (chineseIds.size) {
+      for (const row of data.cohorts) {
+        if (row.checked && row.published_day >= start && row.published_day <= end) observed.add(row.published_day);
+      }
+      for (const row of data.articles) {
+        if (!row.published_day || row.published_day < start || row.published_day > end) continue;
+        if (row.checked) observed.add(row.published_day);
+        for (const match of row.matches) {
+          if (chineseIds.has(match.term_id)) {
+            const key = row.published_day + ':' + match.term_id;
+            chinese.set(key, (chinese.get(key) ?? 0) + match.occurrences);
+          }
+        }
+      }
+    }
+  }
+  const x = new Map(data.japanese_x.daily.map(row => [row.day + ':' + row.term_id,row.post_count]));
+  const series = [];
+  for (const term of data.japanese_x.terms) {
+    if (!selected.has(term.id)) continue;
+    series.push({label:'X · ' + term.keyword, chinese:false, term:term.id,
+      values:dates.map(day => x.get(day + ':' + term.id) ?? null)});
+    if (comparison !== 'x' && term.chinese_term_id !== null) {
+      const phrase = data.terms.find(t => t.id === term.chinese_term_id).phrase;
+      series.push({label:'中国メディア · ' + phrase, chinese:true, term:term.id,
+        values:dates.map(day => chinese.get(day + ':' + term.chinese_term_id) ?? (observed.has(day) ? 0 : null))});
+    }
+  }
+  for (const line of series) {
+    const max = line.values.reduce((current,value) => Math.max(current,value ?? 0),0);
+    line.plotted = comparison === 'normalized'
+      ? line.values.map(value => value === null || max === 0 ? value : value * 100 / max)
+      : line.values;
+  }
+  return {dates,series};
+}

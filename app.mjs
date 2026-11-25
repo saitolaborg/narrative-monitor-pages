@@ -1,4 +1,4 @@
-import {includesRoute,fromURL,resolveState,toURL,aggregate,drillPeriod,articleURL} from './model.mjs';
+import {includesRoute,fromURL,resolveState,toURL,aggregate,drillPeriod,articleURL,japaneseXSeries} from './model.mjs';
 const $=id=>document.getElementById(id);
 const labels={continuous:'継続収集対象',hold:'取得停止・保留',trial_only:'通常の定期設定なし',stopped:'継続設定あり・停止中',unverified:'稼働未確認'};
 const fmt=n=>n===null||n===undefined?'未確認':Number(n).toLocaleString('ja-JP'),pct=n=>n===null?'未確認':n.toFixed(1)+'%';
@@ -379,6 +379,7 @@ $('print-url').textContent = new URL(toURL({...state, preset:'custom'}), locatio
 }
 function apply(input){try{state=resolveState(input,dataset);render();}catch(e){$('error').hidden=false;$('error').textContent=e.message;}}
 export async function start(){try{const response=await fetch(new URL('./data.json',import.meta.url),{cache:'no-cache'});if(!response.ok)throw Error('公開データの読込に失敗しました。');dataset=await response.json();dataset.themes ||= [...new Set(dataset.terms.map(t=>t.topic))].map(id=>({id,label:id}));if(dataset.metadata.schema_version!==1)throw Error('未対応のデータ形式です。');
+if (dataset.japanese_x) setupJapaneseX(dataset);
 for(const [id,rows] of [['site',dataset.sites.map(s=>[s.id,s.label])],['term',dataset.terms.map(t=>[String(t.id),t.phrase])],['topic',dataset.themes.map(t=>[t.id,t.label])]])for(const [value,label] of rows){const o=el('option',label);o.value=value;$(id).append(o);}
 for(const [value,label] of [['7','直近7日'],['30','直近30日'],['90','直近90日'],['6mo','直近6か月'],['365','直近1年間'],['all','全期間'],['custom','任意期間']]){const b=el('button',label);b.type='button';b.dataset.preset=value;b.addEventListener('click', () => {
   if (value === 'custom') $('start').closest('details').open = true;
@@ -406,3 +407,149 @@ window.addEventListener('afterprint',()=>{
   if (articles) renderArticles();
 });
 start();
+
+function setupJapaneseX(data) {
+  const x = data.japanese_x;
+  const min = x.daily[0]?.day ?? data.metadata.generated_at_jst.slice(0,10);
+  const previous = new Date(data.metadata.generated_at_jst.slice(0,10) + 'T00:00:00Z');
+  previous.setUTCDate(previous.getUTCDate() - 1);
+  const max = [min, previous.toISOString().slice(0,10), x.daily.at(-1)?.day ?? min].sort().at(-1);
+  const start = $('x-start'), end = $('x-end');
+  start.min = end.min = min;
+  start.max = end.max = max;
+  const recent = new Date(max + 'T00:00:00Z');
+  recent.setUTCDate(recent.getUTCDate() - 29);
+  start.value = [min,recent.toISOString().slice(0,10)].sort().at(-1);
+  end.value = max;
+  const collected = x.daily.length ? x.daily[0].day + ' 〜 ' + x.daily.at(-1).day : '未取得';
+  $('x-updated').textContent = '集計の最終取得（JST） ' + date(x.updated_at) + ' ／ 保存済みの対象日 ' + collected;
+  $('x-limitations').replaceChildren(...x.limitations.map(note => el('li',note)));
+  const inputs = x.terms.map(term => {
+    const input = el('input');
+    input.type = 'checkbox';
+    input.checked = term.id === 0;
+    const label = el('label');
+    label.append(input, document.createTextNode(term.keyword));
+    $('x-terms').append(label);
+    input.addEventListener('change',render);
+    return [term.id,input];
+  });
+  for (const [id, checked] of [['x-select-all',true],['x-select-none',false]]) {
+    $(id).addEventListener('click',() => {
+      for (const [,input] of inputs) input.checked = checked;
+      render();
+    });
+  }
+  const inspector = $('x-day'), resultTable = $('x-table-details');
+  let inspectDay = () => {};
+  let renderTable = () => {};
+  inspector.addEventListener('input', () => inspectDay(Number(inspector.value)));
+  resultTable.addEventListener('toggle', () => { if (resultTable.open) renderTable(); });
+  for (const id of ['x-start','x-end','x-scale','x-comparison']) $(id).addEventListener('change',render);
+  for (const key of ['china','x']) $(key+'-tab').addEventListener('click',() => {
+    for (const panel of ['china','x']) {
+      $(panel+'-panel').hidden = panel !== key;
+      $(panel+'-tab').setAttribute('aria-pressed',String(panel === key));
+    }
+    if (key === 'x') render();
+  });
+  $('monitor-tabs').hidden = false;
+
+  function render() {
+    const selected = new Set(inputs.filter(([,input]) => input.checked).map(([id]) => id));
+    const mode = $('x-comparison').value;
+    const log = $('x-scale').value === 'log';
+    if (!start.value || !end.value || start.value > end.value || !start.validity.valid || !end.validity.valid || !selected.size) {
+      $('x-status').textContent = '有効な期間と監視語を選択してください。';
+      $('x-comparison-note').textContent = '';
+      $('x-inspector').hidden = true;
+      renderTable = () => {};
+      for (const id of ['x-chart','x-legend','x-table']) $(id).replaceChildren();
+      return;
+    }
+    const {dates,series} = japaneseXSeries(data,start.value,end.value,selected,mode);
+    const missing = series.reduce((total,line) => total + line.values.filter(v => v === null).length,0);
+    $('x-status').textContent = `欠測 ${fmt(missing)}セル。グラフの空白と日別の内訳で確認できます。`;
+    const rawNote = 'Xは日本語投稿件数、中国メディアは対応語が保存記事に出現した回数です。いずれもJSTの日別で、母集団と単位が異なります。時系列の相関や先行だけでは因果関係や影響工作は判断できません。';
+    const normNote = '表示期間内の系列ごとの最大値を100とし、全点0の系列は0、欠測日は欠測のまま表示します。';
+    $('x-comparison-note').textContent = [mode !== 'x' ? rawNote : '', mode === 'normalized' ? normNote : '',
+      log ? '対数軸は log₁₀(1＋値) を使い、0件を基線上に描きます。' : ''].filter(Boolean).join(' ');
+    const palette = ['#096958','#a33222','#175590','#734390','#8b5905','#126a82','#88245b','#42651c','#59431e',
+      '#784331','#4374b8','#b2447d','#556b31','#087a85','#663f72','#a4501c','#4b5a8f','#506268'];
+    const svgNS = 'http://www.w3.org/2000/svg';
+    function node(tag, attrs, parent, label) {
+      const element = document.createElementNS(svgNS,tag);
+      for (const [key,value] of Object.entries(attrs)) element.setAttribute(key,value);
+      if (label !== undefined) element.textContent = label;
+      if (parent) parent.append(element);
+      return element;
+    }
+    const svg = node('svg',{viewBox:'0 0 800 310',role:'img','aria-label':'日別件数の時系列'});
+    const transform = log ? value => Math.log10(1 + value) : value => value;
+    const invert = log ? value => 10 ** value - 1 : value => value;
+    const top = series.reduce((n,line) => line.plotted.reduce((m,v) => Math.max(m, transform(v ?? 0)),n),1);
+    for (const fraction of [0,.25,.5,.75,1]) {
+      const y = 265 - fraction * 245;
+      node('line',{x1:72,x2:780,y1:y,y2:y,class:'chart-grid'},svg);
+      node('text',{x:65,y:y+4,'text-anchor':'end',class:'chart-date-label'},svg,
+        Number(invert(top*fraction).toPrecision(3)).toLocaleString('ja-JP'));
+    }
+    const xx = index => dates.length === 1 ? 426 : 72 + index * 708 / (dates.length - 1);
+    const indexes = new Set([0,Math.floor((dates.length-1)/2),dates.length-1]);
+    for (const i of indexes) node('text',{x:xx(i),y:289,'text-anchor':i===0?'start':i===dates.length-1?'end':'middle',
+      class:'chart-date-label'},svg,dates[i]);
+    const legends = [];
+    for (const line of series) {
+      const color = palette[x.terms.findIndex(t => t.id === line.term) % palette.length];
+      const stroke = {stroke:color,'stroke-width':2,'stroke-dasharray':line.chinese?'6 4':'none'};
+      let path = '', connected = false;
+      line.plotted.forEach((value,i) => {
+        if (value === null) { connected = false; return; }
+        const y = 265 - transform(value)*245/top;
+        path += `${connected?'L':'M'}${xx(i)},${y} `;
+        connected = true;
+        if (dates.length <= 90 || value === 0 || (line.plotted[i-1] == null && line.plotted[i+1] == null)) {
+          const dot = node('circle',{cx:xx(i),cy:y,r:2.5,fill:color},svg);
+          node('title',{},dot,`${dates[i]} ${line.label} ${fmt(line.values[i])}`);
+        }
+      });
+      node('path',{d:path,fill:'none',...stroke},svg);
+      const legend = el('span');
+      const swatch = node('svg',{width:22,height:12,'aria-hidden':'true'},legend);
+      node('line',{x1:0,x2:22,y1:6,y2:6,...stroke},swatch);
+      legend.append(document.createTextNode(line.label));
+      legends.push(legend);
+    }
+    const guide = node('line',{x1:72,x2:72,y1:20,y2:265,class:'x-guide','aria-hidden':'true'},svg);
+    $('x-chart').replaceChildren(svg);
+    $('x-legend').replaceChildren(...legends);
+    const valueAt = (line,i) => line.values[i] === null ? '欠測' : mode === 'normalized'
+      ? `${line.plotted[i].toFixed(1)}（${fmt(line.values[i])}）` : fmt(line.values[i]);
+    inspectDay = i => {
+      inspector.value = String(i);
+      inspector.setAttribute('aria-valuetext', dates[i]);
+      guide.setAttribute('x1',xx(i));
+      guide.setAttribute('x2',xx(i));
+      $('x-day-counts').replaceChildren(el('strong',dates[i] + '（JST）'),
+        ...series.map(line => el('span',line.label + ' ' + valueAt(line,i))));
+    };
+    inspector.max = String(dates.length - 1);
+    inspectDay(dates.length - 1);
+    $('x-inspector').hidden = false;
+    svg.addEventListener('pointerdown', event => {
+      const point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const chartX = point.matrixTransform(svg.getScreenCTM().inverse()).x;
+      inspectDay(Math.min(dates.length-1, Math.max(0, Math.round((chartX-72) / 708 * (dates.length-1)))));
+    });
+    let tableReady = false;
+    renderTable = () => {
+      if (tableReady) return;
+      table('x-table',['日付（JST）',...series.map(line => line.label)],dates.map((day,i) =>
+        [day,...series.map(line => valueAt(line,i))]));
+      tableReady = true;
+    };
+    if (resultTable.open) renderTable();
+  }
+}

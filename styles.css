@@ -155,3 +155,16 @@ td, th { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; w
   .panel:has(#matrix), .panel:has(#sites) {break-inside:avoid;}
   #results-heading:focus {outline:none;}
 }
+
+.monitor-tabs:not([hidden]), .x-legend { display:flex; flex-wrap:wrap; gap:.65rem; }
+.monitor-tabs button[aria-pressed="true"] { background:#006b59; color:white; }
+.x-term-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr)); gap:.4rem; margin-block:1rem; }
+.x-term-grid label { display:flex; gap:.4rem; align-items:center; }
+#x-chart svg { width:100%; display:block; overflow:visible; }
+.x-legend { margin-block:.75rem; }
+.x-legend svg { vertical-align:middle; margin-inline-end:.3rem; }
+.x-selection { display:flex; gap:.5rem; margin-block:.5rem; }
+#x-inspector { display:grid; gap:.3rem; margin-block:.75rem; }
+#x-day { width:100%; padding:0; }
+#x-day-counts { display:flex; flex-wrap:wrap; gap:.4rem .9rem; font-variant-numeric:tabular-nums; }
+.x-guide { stroke:#657079; stroke-dasharray:3 4; pointer-events:none; }
