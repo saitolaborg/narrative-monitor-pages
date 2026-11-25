@@ -430,6 +430,15 @@ function setupJapaneseX(data) {
   for (const input of [start,end]) input.addEventListener('change', () => { period.value = 'custom'; render(); });
   const collected = x.daily.length ? x.daily[0].day + ' 〜 ' + x.daily.at(-1).day : '未取得';
   $('x-updated').textContent = '集計の最終取得（JST） ' + date(x.updated_at) + ' ／ 対象日 ' + min + ' 〜 ' + max + ' ／ 保存済み ' + collected;
+  const historyEnd = '2026-11-24';
+  if (x.coverage_start && x.coverage_start <= historyEnd) {
+    const targetDays = (Date.parse(historyEnd) - Date.parse(x.coverage_start)) / 86400000 + 1;
+    const targetCells = targetDays * x.terms.length;
+    const savedCells = x.daily.filter(row => x.coverage_start <= row.day && row.day <= historyEnd).length;
+    const missingCells = targetCells - savedCells;
+    const status = missingCells ? '長期データを収集中' : '長期データの収集完了';
+    $('x-history-progress').textContent = `${status}（${x.coverage_start} 〜 ${historyEnd} JST） 保存済み ${fmt(savedCells)}／${fmt(targetCells)}セル、欠測 ${fmt(missingCells)}セル。`;
+  }
   $('x-limitations').replaceChildren(...x.limitations.map(note => el('li',note)));
   const inputs = x.terms.map(term => {
     const input = el('input');
