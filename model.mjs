@@ -28,6 +28,34 @@ export function resolveState(input,data,now=new Date()){
 export function fromURL(search,data,now){return resolveState(Object.fromEntries(new URLSearchParams(search)),data,now);}
 export function toURL(state){return '?'+new URLSearchParams(state).toString();}
 export function bucket(day,grain){if(grain==='month')return day.slice(0,7);if(grain==='week'){let n=new Date(day+'T00:00:00Z').getUTCDay();return addDays(day,-((n+6)%7));}return day;}
+const weekdays = ['日','月','火','水','木','金','土'];
+function calendarDate(day, includeYear=true) {
+ const [year,month,date]=day.split('-').map(Number);
+ return (includeYear ? `${year}年` : '')+`${month}月${date}日`;
+}
+export function periodLabel({start,end,days},grain,basis='JST') {
+ const first=calendarDate(start);
+ if(grain==='day'){
+  const weekday=weekdays[new Date(start+'T00:00:00Z').getUTCDay()];
+  return [`${first}（${weekday}）`,basis==='JST' ? '00:00〜翌日00:00 JST' : '記事掲載日の暦日'];
+ }
+ const range=start===end ? first : first+'〜'+calendarDate(end,start.slice(0,4)!==end.slice(0,4));
+ return [range,`${days}日間の合計（${grain==='week'?'週別':'月別'}・${basis}）`];
+}
+export function missingDateRanges(days) {
+ const ranges=[];
+ for(const day of days){
+  const last=ranges.at(-1);
+  if(last && addDays(last[1],1)===day)last[1]=day;
+  else ranges.push([day,day]);
+ }
+ return ranges.map(([start,end])=>{
+  const first=calendarDate(start,false);
+  if(start===end)return first;
+  if(start.slice(0,7)===end.slice(0,7))return `${first.slice(0,-1)}〜${Number(end.slice(8))}日`;
+  return first+'〜'+calendarDate(end,false);
+ }).join('、');
+}
 export function drillPeriod(period, state) {
  const end = state.grain === 'week' ? addDays(period, 6) :
    state.grain === 'month' ? addDays(new Date(Date.UTC(+period.slice(0,4), +period.slice(5), 1)).toISOString().slice(0,10), -1) : period;
@@ -76,8 +104,16 @@ export function aggregate(data,state){
    attemptedUnresolved:sum(a=>a.body_applicable&&a.attempted&&!a.body_ok)};
  }
  const time=new Map();
+ const periods=new Map();
  // Fill zeroes only within the selected range; accompanying run coverage disambiguates missing data.
- for(let day=state.start;day<=state.end;day=addDays(day,1))time.set(bucket(day,state.grain),[]);
+ for(let day=state.start;day<=state.end;day=addDays(day,1)){
+  const key=bucket(day,state.grain);
+  if(!time.has(key)){
+   time.set(key,[]);
+   periods.set(key,[]);
+  }
+  periods.get(key).push(day);
+ }
  for(const a of coverageRows)time.get(bucket(a[axis],state.grain))?.push(a);
  const selectedRuns=canUseRuns?data.sites.filter(s=>state.site==='all'||s.id===state.site).flatMap(s=>s.runs).filter(r=>{const day=jstDay(new Date(r.started_at));return day>=state.start&&day<=state.end;}):[];
  const series=[...time].map(([date,items])=>{const runs=selectedRuns.filter(r=>bucket(jstDay(new Date(r.started_at)),state.grain)===date);
@@ -94,7 +130,10 @@ export function aggregate(data,state){
   for(const item of items) for(const hit of matching(item)) {
    termOccurrences[hit.term_id]=(termOccurrences[hit.term_id] || 0)+hit.occurrences;
   }
-  return {date,collectionState,...counts(items),termOccurrences};
+  const days=periods.get(date);
+  const observedDays=new Set(items.filter(confirmed).map(item=>item.published_day));
+  return {date,collectionState,...counts(items),termOccurrences,
+   period:{start:days[0],end:days.at(-1),days:days.length}, observedDays:observedDays.size};
  });
  const sites=data.sites.filter(s=>state.site==='all'||s.id===state.site).map(s=>{
   const items=rows.filter(a=>a.site===s.id),sourceRuns=canUseRuns?s.runs:[],runs=sourceRuns.filter(r=>jstDay(new Date(r.started_at))>=state.start&&jstDay(new Date(r.started_at))<=state.end);
@@ -174,27 +213,32 @@ export function japaneseXSeries(data, start, end, selected, comparison, grain = 
     }
   }
   const missingDays = series.reduce((sum, line) => sum + line.values.filter(value => value === null).length, 0);
-  if (grain !== 'day') {
-    const buckets = new Map();
-    for (const [index, day] of dates.entries()) {
-      const stamp = new Date(day + 'T00:00:00Z');
-      if (grain === 'week') stamp.setUTCDate(stamp.getUTCDate() - ((stamp.getUTCDay() + 6) % 7));
-      if (grain === 'month') stamp.setUTCDate(1);
-      const key = stamp.toISOString().slice(0, 10);
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key).push(index);
-    }
-    dates = [...buckets.values()].map(indexes => dates[indexes[0]]);
-    for (const line of series) {
-      line.values = [...buckets.values()].map(indexes => indexes.reduce((sum, index) =>
-        sum === null || line.values[index] === null ? null : sum + line.values[index], 0));
-    }
+  const buckets = new Map();
+  for (const [index, day] of dates.entries()) {
+    const key = bucket(day,grain);
+    if (!buckets.has(key)) buckets.set(key,[]);
+    buckets.get(key).push(index);
   }
+  const groups = [...buckets.values()];
+  const periods = groups.map(indexes => ({
+    start:dates[indexes[0]],end:dates[indexes.at(-1)],days:indexes.length
+  }));
   for (const line of series) {
+    line.coverage = groups.map(indexes => {
+      const missing = [];
+      let sum = 0;
+      for (const index of indexes) {
+        const value = line.values[index];
+        if (value === null) missing.push(dates[index]);
+        else sum += value;
+      }
+      return {missing,sum,known:indexes.length-missing.length};
+    });
+    line.values = line.coverage.map(part => part.missing.length ? null : part.sum);
     const max = line.values.reduce((current,value) => Math.max(current,value ?? 0),0);
     line.plotted = comparison === 'normalized'
       ? line.values.map(value => value === null || max === 0 ? value : value * 100 / max)
       : line.values;
   }
-  return {dates,series,missingDays};
+  return {dates:periods.map(period=>period.start),periods,series,missingDays};
 }

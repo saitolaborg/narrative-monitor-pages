@@ -55,12 +55,20 @@ details .controls { margin-top: 8px; }
 .chart-marker.active { stroke: #182c23; stroke-width: 2; r: 7px; }
 .chart-point { cursor: pointer; }
 .chart-point:focus { outline: none; }
-.chart-tooltip { position: absolute; z-index: 1; pointer-events: none; box-sizing: border-box;
-  max-width: min(270px, calc(100% - 8px)); padding: 8px 11px; color: #18362c;
+.chart-tooltip { position: fixed; z-index: 10; pointer-events: none; box-sizing: border-box;
+  width: max-content; max-width: min(410px, calc(100vw - 16px)); max-height: calc(100vh - 16px);
+  overflow: auto; overflow-wrap: anywhere; padding: 8px 11px; color: #18362c;
   background: #fff; border: 1px solid #547569; border-radius: 6px; font-size: .81rem;
   line-height: 1.35; box-shadow: 0 2px 10px #172c2333; }
-.chart-tooltip ul { padding-left: 1.2em; margin: 4px 0 0; columns: 2; }
+.chart-tooltip.pinned { pointer-events: auto; }
+.chart-tooltip-close { display: none; }
+.chart-tooltip.pinned .chart-tooltip-close { display: block; }
+.chart-tooltip ul { padding: 0; margin: 4px 0 0; list-style: none; }
 .chart-tooltip li { break-inside: avoid; }
+.chart-tooltip-row { display:grid; grid-template-columns: 9px minmax(0,1fr) auto; gap: 2px 6px;
+  align-items: baseline; padding: 4px 0; border-top: 1px solid var(--line); }
+.chart-tooltip-row small { grid-column: 2 / -1; color: var(--muted); }
+.chart-tooltip-swatch { width: 9px; height: 9px; border-radius: 50%; }
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 td, th { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }

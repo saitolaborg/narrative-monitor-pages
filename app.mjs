@@ -1,9 +1,37 @@
-import {includesRoute,fromURL,resolveState,toURL,aggregate,drillPeriod,articleURL,japaneseXSeries} from './model.mjs';
+import {includesRoute,fromURL,resolveState,toURL,aggregate,drillPeriod,articleURL,japaneseXSeries,periodLabel,missingDateRanges} from './model.mjs';
 const $=id=>document.getElementById(id);
 const labels={continuous:'継続収集対象',hold:'取得停止・保留',trial_only:'通常の定期設定なし',stopped:'継続設定あり・停止中',unverified:'稼働未確認'};
 const fmt=n=>n===null||n===undefined?'未確認':Number(n).toLocaleString('ja-JP'),pct=n=>n===null?'未確認':n.toFixed(1)+'%';
 const date=s=>s?new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',dateStyle:'medium',timeStyle:'medium'}).format(new Date(s)):'不明';
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
+function chartTooltip(id) {
+  const tooltip=el('div',undefined,'chart-tooltip');
+  tooltip.id=id;
+  tooltip.setAttribute('role','tooltip');
+  tooltip.hidden=true;
+  return tooltip;
+}
+function periodHeading(period,grain,basis) {
+  return periodLabel(period,grain,basis).map((label,i)=>el(i ? 'div' : 'strong',label));
+}
+function positionTooltip(tooltip,svg,x,y,width,height) {
+  const bounds=svg.getBoundingClientRect();
+  const pointX=bounds.left+x*bounds.width/width;
+  const pointY=bounds.top+y*bounds.height/height;
+  const maxLeft=document.documentElement.clientWidth-tooltip.offsetWidth-8;
+  const maxTop=document.documentElement.clientHeight-tooltip.offsetHeight-8;
+  const side=pointX+12<=maxLeft ? pointX+12 : pointX-tooltip.offsetWidth-12;
+  tooltip.style.left=`${Math.max(8,Math.min(maxLeft,side))}px`;
+  tooltip.style.top=`${Math.max(8,Math.min(maxTop,pointY-24))}px`;
+}
+function tooltipRow(label,value,color,detail) {
+  const row=el('li',undefined,'chart-tooltip-row');
+  const swatch=el('span',undefined,'chart-tooltip-swatch');
+  swatch.style.backgroundColor=color;
+  row.append(swatch,el('span',label),el('strong',value));
+  if(detail)row.append(el('small',detail));
+  return row;
+}
 function table(target,heads,rows){const t=el('table'),thead=el('thead'),tr=el('tr');for(const h of heads)tr.append(el('th',h));thead.append(tr);t.append(thead);const body=el('tbody');for(const row of rows){const tr=el('tr');for(const value of row){const cell=el('td');cell.append(value instanceof Node ? value : String(value));tr.append(cell);};body.append(tr);}t.append(body);$(target).replaceChildren(t);}
 function action(label, handler) {
   const button = el('button', label, 'text-button');
@@ -78,8 +106,8 @@ function chart(rows) {
     node('text', {x, y:bottom+21, 'text-anchor':anchor, class:'chart-date-label'}, rows[index].date);
   }
 
-  const points = rows.flatMap((row, index) => unknownStates.has(row.collectionState) ? [] :
-    [{row, index, x:xAt(index), y:yAt(row.occurrences)}]);
+  const points = rows.map((row,index)=>({row,index,x:xAt(index),y:yAt(row.occurrences),
+    known:!unknownStates.has(row.collectionState)}));
   let segment = [];
   function drawSegment() {
     if (segment.length > 1) node('polyline', {
@@ -87,7 +115,7 @@ function chart(rows) {
     });
     segment = [];
   }
-  for (const point of points) {
+  for (const point of points.filter(p=>p.known)) {
     if (segment.length && point.index !== segment.at(-1).index + 1) drawSegment();
     segment.push(point);
   }
@@ -97,10 +125,7 @@ function chart(rows) {
   const horizontal = node('line', {}, undefined, guides);
   const markers = node('g', {class:'chart-markers', 'aria-hidden':'true'});
   const targets = node('g', {});
-  const tooltip = el('div', undefined, 'chart-tooltip');
-  tooltip.id = 'publication-tooltip';
-  tooltip.setAttribute('role', 'tooltip');
-  tooltip.hidden = true;
+  const tooltip = chartTooltip('publication-tooltip');
 
   const terms = dataset.terms.filter(t=>(state.term==='all' || String(t.id)===state.term)
                                    && (state.topic==='all' || t.topic===state.topic));
@@ -112,7 +137,7 @@ function chart(rows) {
   let active, pinned;
   function hide() {
     if (active) {
-      active.marker.classList.remove('active');
+      active.marker?.classList.remove('active');
       active.target.removeAttribute('aria-describedby');
     }
     active = null;
@@ -120,21 +145,31 @@ function chart(rows) {
     guides.setAttribute('visibility','hidden');
   }
   function show(point) {
-    if (active===point) return;
+    if (active===point) {
+      tooltip.classList.toggle('pinned',pinned===point);
+      return;
+    }
     hide();
     active = point;
     const {row,x,y,marker,target} = point;
-    marker.classList.add('active');
+    marker?.classList.add('active');
     for (const [line, attrs] of [[vertical,{x1:x,x2:x,y1:top,y2:bottom}],
                                  [horizontal,{x1:left,x2:right,y1:y,y2:y}]]) {
       for (const [key,value] of Object.entries(attrs)) line.setAttribute(key,value);
     }
     guides.setAttribute('visibility','visible');
+    horizontal.setAttribute('visibility',point.known?'visible':'hidden');
     const details = [
-      el('strong', `${dateLabel}：${dayOf(row)}`),
-      el('div', `監視語句：${termLabel}`),
-      el('div', `出現回数：${fmt(row.occurrences)}回`),
+      ...periodHeading(row.period,state.grain,'掲載日基準'),
+      el('div','中国メディア・記事掲載日ベース・語句出現回数'),
     ];
+    const close = action('閉じる',()=>{pinned=null;hide();});
+    close.className='chart-tooltip-close';
+    details.push(close);
+    const summary=el('ul');
+    summary.append(tooltipRow(termLabel,point.known ? `${fmt(row.occurrences)}回` : '欠測・未確認','#006b59'));
+    details.push(summary);
+    if (row.period.days>1) details.push(el('div',`保存観測を確認した掲載日 ${row.observedDays}／${row.period.days}日（収集の網羅性は未確認）`));
     if (siteLabel) details.push(el('div', `媒体：${siteLabel}`));
     if (terms.length > 1) {
       const hits = terms.filter(t=>row.termOccurrences[t.id] > 0);
@@ -146,10 +181,8 @@ function chart(rows) {
     }
     tooltip.replaceChildren(...details);
     tooltip.hidden = false;
-    const maxLeft = width - 4 - tooltip.offsetWidth;
-    const nextToPoint = x+13 <= maxLeft ? x+13 : x-tooltip.offsetWidth-13;
-    tooltip.style.left = `${Math.max(4, Math.min(maxLeft,nextToPoint))}px`;
-    tooltip.style.top = `${Math.max(4, Math.min(height-tooltip.offsetHeight-4, y-25))}px`;
+    tooltip.classList.toggle('pinned',pinned===point);
+    positionTooltip(tooltip,svg,x,y,width,height);
     target.setAttribute('aria-describedby', tooltip.id);
   }
 
@@ -171,10 +204,10 @@ function chart(rows) {
 
   for (const [i,point] of points.entries()) {
     const {row,index,x,y} = point;
-    point.marker = node('circle', {cx:x,cy:y,r:4.5,class:'chart-marker'}, undefined, markers);
+    if(point.known)point.marker = node('circle', {cx:x,cy:y,r:4.5,class:'chart-marker'}, undefined, markers);
     const target = point.target = node('g', {
       class:'chart-point', role:'button', tabindex:i===0 ? 0 : -1,
-      'aria-label':`${dateLabel} ${dayOf(row)}、${termLabel}、${fmt(row.occurrences)}回${siteLabel ? '、'+siteLabel : ''}`,
+      'aria-label':`${dateLabel} ${dayOf(row)}、${termLabel}、${point.known ? fmt(row.occurrences)+'回' : '欠測・未確認'}${siteLabel ? '、'+siteLabel : ''}`,
     }, undefined, targets);
     const xStart = point.xStart = index===0 ? left-12 : (xAt(index-1)+x)/2;
     const xEnd = point.xEnd = index===rows.length-1 ? right+12 : (x+xAt(index+1))/2;
@@ -458,8 +491,11 @@ function setupJapaneseX(data) {
   }
   const inspector = $('x-day'), resultTable = $('x-table-details');
   let inspectDay = () => {};
+  let dismissTooltip = () => {};
   let renderTable = () => {};
-  inspector.addEventListener('input', () => inspectDay(Number(inspector.value)));
+  inspector.addEventListener('input', () => inspectDay(Number(inspector.value),true));
+  inspector.addEventListener('blur', () => dismissTooltip(false));
+  inspector.addEventListener('keydown', event => {if(event.key==='Escape')dismissTooltip();});
   resultTable.addEventListener('toggle', () => { if (resultTable.open) renderTable(); });
   for (const id of ['x-grain','x-scale','x-comparison']) $(id).addEventListener('change',render);
   for (const key of ['china','x']) $(key+'-tab').addEventListener('click',() => {
@@ -480,18 +516,20 @@ function setupJapaneseX(data) {
       $('x-comparison-note').textContent = '';
       $('x-inspector').hidden = true;
       renderTable = () => {};
+      dismissTooltip = () => {};
       for (const id of ['x-chart','x-legend','x-table']) $(id).replaceChildren();
       return;
     }
     const grain = $('x-grain').value;
-    const {dates,series,missingDays} = japaneseXSeries(data,start.value,end.value,selected,mode,grain);
+    const {dates,periods,series,missingDays} = japaneseXSeries(data,start.value,end.value,selected,mode,grain);
     $('x-status').textContent = `日別の欠測 ${fmt(missingDays)}セル。選択期間内に欠測日を含む週・月は空白になります。`;
-    const rawNote = 'Xは日本語投稿件数、中国メディアは対応語が保存記事に出現した回数です。いずれもJSTを基準とし、母集団と単位が異なります。時系列の相関や先行だけでは因果関係や影響工作は判断できません。';
+    const rawNote = 'XはJSTの日本語投稿件数、中国メディアは保存記事の掲載日別の語句出現回数です。掲載日のタイムゾーンは日付の根拠に依存します。時系列の相関や先行だけでは因果関係や影響工作は判断できません。';
     const normNote = '表示期間内の系列ごとの最大値を100とし、全点0の系列は0、欠測日は欠測のまま表示します。';
     $('x-comparison-note').textContent = [mode !== 'x' ? rawNote : '', mode === 'normalized' ? normNote : '',
       log ? '対数軸は log₁₀(1＋値) を使い、0件を基線上に描きます。' : ''].filter(Boolean).join(' ');
     const palette = ['#096958','#a33222','#175590','#734390','#8b5905','#126a82','#88245b','#42651c','#59431e',
       '#784331','#4374b8','#b2447d','#556b31','#087a85','#663f72','#a4501c','#4b5a8f','#506268'];
+    const colors = new Map(x.terms.map((term,i)=>[term.id,palette[i]]));
     const svgNS = 'http://www.w3.org/2000/svg';
     function node(tag, attrs, parent, label) {
       const element = document.createElementNS(svgNS,tag);
@@ -516,7 +554,7 @@ function setupJapaneseX(data) {
       class:'chart-date-label'},svg,dates[i]);
     const legends = [];
     for (const line of series) {
-      const color = palette[x.terms.findIndex(t => t.id === line.term) % palette.length];
+      const color = colors.get(line.term);
       const stroke = {stroke:color,'stroke-width':2,'stroke-dasharray':line.chinese?'6 4':'none'};
       let path = '', connected = false;
       line.plotted.forEach((value,i) => {
@@ -525,8 +563,7 @@ function setupJapaneseX(data) {
         path += `${connected?'L':'M'}${xx(i)},${y} `;
         connected = true;
         if (dates.length <= 90 || (line.plotted[i-1] == null && line.plotted[i+1] == null)) {
-          const dot = node('circle',{cx:xx(i),cy:y,r:2.5,fill:color},svg);
-          node('title',{},dot,`${dates[i]} ${line.label} ${fmt(line.values[i])}`);
+          node('circle',{cx:xx(i),cy:y,r:2.5,fill:color},svg);
         }
       });
       node('path',{d:path,fill:'none',...stroke},svg);
@@ -537,27 +574,72 @@ function setupJapaneseX(data) {
       legends.push(legend);
     }
     const guide = node('line',{x1:72,x2:72,y1:20,y2:265,class:'x-guide','aria-hidden':'true'},svg);
-    $('x-chart').replaceChildren(svg);
+    const tooltip = chartTooltip('x-tooltip');
+    $('x-chart').replaceChildren(svg,tooltip);
     $('x-legend').replaceChildren(...legends);
     const valueAt = (line,i) => line.values[i] === null ? '欠測' : mode === 'normalized'
       ? `${line.plotted[i].toFixed(1)}（${fmt(line.values[i])}）` : fmt(line.values[i]);
-    inspectDay = i => {
+    let active, pinned=false;
+    dismissTooltip = (force=true) => {
+      if (pinned&&!force) return;
+      pinned=false;
+      tooltip.hidden=true;
+    };
+    const close = action('閉じる',()=>dismissTooltip());
+    close.className='chart-tooltip-close';
+    const totals = (line,i) => {
+      const {known,missing,sum} = line.coverage[i];
+      const unit = line.chinese ? '回' : '件';
+      const value = !known ? '欠測' : `${fmt(sum)}${unit}`;
+      const normalized = mode==='normalized' && line.plotted[i]!==null ? ` ／ 指数 ${line.plotted[i].toFixed(1)}` : '';
+      const days = periods[i].days;
+      const coverage = !known ? `未取得：${missingDateRanges(missing)}`
+        : missing.length ? `部分集計：${known}日／${days}日取得済み。未取得：${missingDateRanges(missing)}`
+        : days>1 ? `対象期間取得済み：${known}日／${days}日` : '取得済み';
+      const source = line.chinese ? '中国メディア・記事掲載日ベースの語句出現回数' : 'M API・日本語X投稿件数（JST）';
+      const label = line.term===0&&!line.chinese ? 'X · OR全体（17語）' : line.label;
+      return tooltipRow(label,value+normalized,colors.get(line.term),`${source} ／ ${coverage}`);
+    };
+    inspectDay = (i,show=false) => {
       inspector.value = String(i);
       inspector.setAttribute('aria-valuetext', dates[i]);
       guide.setAttribute('x1',xx(i));
       guide.setAttribute('x2',xx(i));
       $('x-day-counts').replaceChildren(el('strong',dates[i] + '（JST）'),
         ...series.map(line => el('span',line.label + ' ' + valueAt(line,i))));
+      if (!show) return;
+      if (active!==i) {
+        const list=el('ul');
+        list.append(...series.map(line=>totals(line,i)));
+        tooltip.replaceChildren(...periodHeading(periods[i],grain),close,list);
+        tooltip.scrollTop=0;
+        active=i;
+      }
+      tooltip.hidden=false;
+      tooltip.classList.toggle('pinned',pinned);
+      positionTooltip(tooltip,svg,xx(i),28,800,310);
     };
     inspector.max = String(dates.length - 1);
     inspectDay(dates.length - 1);
     $('x-inspector').hidden = false;
-    svg.addEventListener('pointerdown', event => {
-      const point = svg.createSVGPoint();
-      point.x = event.clientX;
-      point.y = event.clientY;
-      const chartX = point.matrixTransform(svg.getScreenCTM().inverse()).x;
-      inspectDay(Math.min(dates.length-1, Math.max(0, Math.round((chartX-72) / 708 * (dates.length-1)))));
+    const indexAt = event => {
+      const bounds=svg.getBoundingClientRect();
+      const chartX=(event.clientX-bounds.left)*800/bounds.width;
+      return Math.min(dates.length-1,Math.max(0,Math.round((chartX-72)/708*(dates.length-1))));
+    };
+    svg.addEventListener('pointermove',event=>{
+      if(event.pointerType==='touch'||pinned)return;
+      const i=indexAt(event);
+      if(active!==i||tooltip.hidden)inspectDay(i,true);
+    });
+    svg.addEventListener('pointerleave',()=>dismissTooltip(false));
+    svg.addEventListener('click',event=>{
+      const i=indexAt(event);
+      if(pinned&&active===i) dismissTooltip();
+      else {pinned=true;inspectDay(i,true);}
+    });
+    tooltip.addEventListener('keydown',event=>{
+      if(event.key==='Escape')dismissTooltip();
     });
     let tableReady = false;
     renderTable = () => {
