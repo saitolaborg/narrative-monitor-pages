@@ -410,19 +410,26 @@ start();
 
 function setupJapaneseX(data) {
   const x = data.japanese_x;
-  const min = x.daily[0]?.day ?? data.metadata.generated_at_jst.slice(0,10);
+  const min = [x.coverage_start, x.daily[0]?.day].filter(Boolean).sort()[0] ?? data.metadata.generated_at_jst.slice(0,10);
   const previous = new Date(data.metadata.generated_at_jst.slice(0,10) + 'T00:00:00Z');
   previous.setUTCDate(previous.getUTCDate() - 1);
   const max = [min, previous.toISOString().slice(0,10), x.daily.at(-1)?.day ?? min].sort().at(-1);
   const start = $('x-start'), end = $('x-end');
   start.min = end.min = min;
   start.max = end.max = max;
-  const recent = new Date(max + 'T00:00:00Z');
-  recent.setUTCDate(recent.getUTCDate() - 29);
-  start.value = [min,recent.toISOString().slice(0,10)].sort().at(-1);
-  end.value = max;
+  const period = $('x-period');
+  function selectPeriod() {
+    if (period.value === 'custom') return;
+    const recent = new Date(max + 'T00:00:00Z');
+    if (period.value !== 'all') recent.setUTCDate(recent.getUTCDate() - (Number(period.value) - 1));
+    start.value = period.value === 'all' ? min : [min,recent.toISOString().slice(0,10)].sort().at(-1);
+    end.value = max;
+  }
+  selectPeriod();
+  period.addEventListener('change', () => { selectPeriod(); render(); });
+  for (const input of [start,end]) input.addEventListener('change', () => { period.value = 'custom'; render(); });
   const collected = x.daily.length ? x.daily[0].day + ' 〜 ' + x.daily.at(-1).day : '未取得';
-  $('x-updated').textContent = '集計の最終取得（JST） ' + date(x.updated_at) + ' ／ 保存済みの対象日 ' + collected;
+  $('x-updated').textContent = '集計の最終取得（JST） ' + date(x.updated_at) + ' ／ 対象日 ' + min + ' 〜 ' + max + ' ／ 保存済み ' + collected;
   $('x-limitations').replaceChildren(...x.limitations.map(note => el('li',note)));
   const inputs = x.terms.map(term => {
     const input = el('input');
@@ -445,7 +452,7 @@ function setupJapaneseX(data) {
   let renderTable = () => {};
   inspector.addEventListener('input', () => inspectDay(Number(inspector.value)));
   resultTable.addEventListener('toggle', () => { if (resultTable.open) renderTable(); });
-  for (const id of ['x-start','x-end','x-scale','x-comparison']) $(id).addEventListener('change',render);
+  for (const id of ['x-grain','x-scale','x-comparison']) $(id).addEventListener('change',render);
   for (const key of ['china','x']) $(key+'-tab').addEventListener('click',() => {
     for (const panel of ['china','x']) {
       $(panel+'-panel').hidden = panel !== key;
@@ -467,10 +474,10 @@ function setupJapaneseX(data) {
       for (const id of ['x-chart','x-legend','x-table']) $(id).replaceChildren();
       return;
     }
-    const {dates,series} = japaneseXSeries(data,start.value,end.value,selected,mode);
-    const missing = series.reduce((total,line) => total + line.values.filter(v => v === null).length,0);
-    $('x-status').textContent = `欠測 ${fmt(missing)}セル。グラフの空白と日別の内訳で確認できます。`;
-    const rawNote = 'Xは日本語投稿件数、中国メディアは対応語が保存記事に出現した回数です。いずれもJSTの日別で、母集団と単位が異なります。時系列の相関や先行だけでは因果関係や影響工作は判断できません。';
+    const grain = $('x-grain').value;
+    const {dates,series,missingDays} = japaneseXSeries(data,start.value,end.value,selected,mode,grain);
+    $('x-status').textContent = `日別の欠測 ${fmt(missingDays)}セル。選択期間内に欠測日を含む週・月は空白になります。`;
+    const rawNote = 'Xは日本語投稿件数、中国メディアは対応語が保存記事に出現した回数です。いずれもJSTを基準とし、母集団と単位が異なります。時系列の相関や先行だけでは因果関係や影響工作は判断できません。';
     const normNote = '表示期間内の系列ごとの最大値を100とし、全点0の系列は0、欠測日は欠測のまま表示します。';
     $('x-comparison-note').textContent = [mode !== 'x' ? rawNote : '', mode === 'normalized' ? normNote : '',
       log ? '対数軸は log₁₀(1＋値) を使い、0件を基線上に描きます。' : ''].filter(Boolean).join(' ');
@@ -484,7 +491,7 @@ function setupJapaneseX(data) {
       if (parent) parent.append(element);
       return element;
     }
-    const svg = node('svg',{viewBox:'0 0 800 310',role:'img','aria-label':'日別件数の時系列'});
+    const svg = node('svg',{viewBox:'0 0 800 310',role:'img','aria-label':'投稿件数の時系列'});
     const transform = log ? value => Math.log10(1 + value) : value => value;
     const invert = log ? value => 10 ** value - 1 : value => value;
     const top = series.reduce((n,line) => line.plotted.reduce((m,v) => Math.max(m, transform(v ?? 0)),n),1);
@@ -508,7 +515,7 @@ function setupJapaneseX(data) {
         const y = 265 - transform(value)*245/top;
         path += `${connected?'L':'M'}${xx(i)},${y} `;
         connected = true;
-        if (dates.length <= 90 || value === 0 || (line.plotted[i-1] == null && line.plotted[i+1] == null)) {
+        if (dates.length <= 90 || (line.plotted[i-1] == null && line.plotted[i+1] == null)) {
           const dot = node('circle',{cx:xx(i),cy:y,r:2.5,fill:color},svg);
           node('title',{},dot,`${dates[i]} ${line.label} ${fmt(line.values[i])}`);
         }
@@ -546,7 +553,7 @@ function setupJapaneseX(data) {
     let tableReady = false;
     renderTable = () => {
       if (tableReady) return;
-      table('x-table',['日付（JST）',...series.map(line => line.label)],dates.map((day,i) =>
+      table('x-table',[grain === 'day' ? '日付（JST）' : '集計開始日（JST）',...series.map(line => line.label)],dates.map((day,i) =>
         [day,...series.map(line => valueAt(line,i))]));
       tableReady = true;
     };

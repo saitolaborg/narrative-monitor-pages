@@ -136,8 +136,8 @@ export function aggregate(data,state){
 }
 
 // Compare Japanese X counts with Chinese media occurrences on publication days.
-export function japaneseXSeries(data, start, end, selected, comparison) {
-  const dates = [];
+export function japaneseXSeries(data, start, end, selected, comparison, grain = 'day') {
+  let dates = [];
   for (let day = new Date(start + 'T00:00:00Z'); day <= new Date(end + 'T00:00:00Z'); day.setUTCDate(day.getUTCDate() + 1)) {
     dates.push(day.toISOString().slice(0,10));
   }
@@ -173,11 +173,28 @@ export function japaneseXSeries(data, start, end, selected, comparison) {
         values:dates.map(day => chinese.get(day + ':' + term.chinese_term_id) ?? (observed.has(day) ? 0 : null))});
     }
   }
+  const missingDays = series.reduce((sum, line) => sum + line.values.filter(value => value === null).length, 0);
+  if (grain !== 'day') {
+    const buckets = new Map();
+    for (const [index, day] of dates.entries()) {
+      const stamp = new Date(day + 'T00:00:00Z');
+      if (grain === 'week') stamp.setUTCDate(stamp.getUTCDate() - ((stamp.getUTCDay() + 6) % 7));
+      if (grain === 'month') stamp.setUTCDate(1);
+      const key = stamp.toISOString().slice(0, 10);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(index);
+    }
+    dates = [...buckets.values()].map(indexes => dates[indexes[0]]);
+    for (const line of series) {
+      line.values = [...buckets.values()].map(indexes => indexes.reduce((sum, index) =>
+        sum === null || line.values[index] === null ? null : sum + line.values[index], 0));
+    }
+  }
   for (const line of series) {
     const max = line.values.reduce((current,value) => Math.max(current,value ?? 0),0);
     line.plotted = comparison === 'normalized'
       ? line.values.map(value => value === null || max === 0 ? value : value * 100 / max)
       : line.values;
   }
-  return {dates,series};
+  return {dates,series,missingDays};
 }
