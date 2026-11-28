@@ -91,7 +91,8 @@ export function aggregate(data,state){
  const rows=population.filter(inPeriod);
  const coverageRows=all.filter(inPeriod);
  const canUseRuns=['all','regular'].includes(state.route);
- const confirmed = a => a.body_ok || (!a.body_applicable && a.checked) || (a.matches || []).length>0;
+ const english = data.terms.length > 0 && data.terms.every(term => term.language === 'en');
+ const confirmed = a => (english ? a.checked : a.body_ok || (!a.body_applicable && a.checked)) || (a.matches || []).length>0;
  function counts(items){
   const sum=(test)=>items.filter(test).reduce((n,a)=>n+a.count,0), attempts=items.reduce((n,a)=>n+a.attempts*a.count,0);
   const successes=items.reduce((n,a)=>n+a.success_attempts*a.count,0),known=items.reduce((n,a)=>n+a.http_known_attempts*a.count,0);
@@ -241,4 +242,13 @@ export function japaneseXSeries(data, start, end, selected, comparison, grain = 
       : line.values;
   }
   return {dates:periods.map(period=>period.start),periods,series,missingDays};
+}
+
+
+export function mediaChartScale(rows, mode) {
+ const known = rows.filter(row=>!['no_run','failed','unjudged'].includes(row.collectionState));
+ const peak = known.reduce((max,row)=>Math.max(max,row.occurrences),0);
+ const transform = mode==='normalized' ? value=>peak ? value*100/peak : 0 :
+  mode==='log' ? value=>Math.log10(1+value) : value=>value;
+ return {transform, maximum:mode==='normalized' ? 100 : Math.max(1, transform(peak))};
 }

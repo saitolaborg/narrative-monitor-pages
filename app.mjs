@@ -1,4 +1,4 @@
-import {includesRoute,fromURL,resolveState,toURL,aggregate,drillPeriod,articleURL,japaneseXSeries,periodLabel,missingDateRanges} from './model.mjs';
+import {includesRoute,fromURL,resolveState,toURL,aggregate,drillPeriod,articleURL,japaneseXSeries,periodLabel,missingDateRanges,mediaChartScale} from './model.mjs';
 const $=id=>document.getElementById(id);
 const labels={continuous:'継続収集対象',hold:'取得停止・保留',trial_only:'通常の定期設定なし',stopped:'継続設定あり・停止中',unverified:'稼働未確認'};
 const fmt=n=>n===null||n===undefined?'未確認':Number(n).toLocaleString('ja-JP'),pct=n=>n===null?'未確認':n.toFixed(1)+'%';
@@ -71,16 +71,17 @@ function chart(rows) {
   const width = chartWidth = measuredChartWidth();
   const height = width < 500 ? 236 : 290;
   const top = 22, bottom = height - 34, right = width - 14;
-  const maximum = rows.reduce((largest, row) => Math.max(largest, row.occurrences), 1);
-  const ticks = Math.min(4, maximum);
-  const step = Math.ceil(maximum / ticks);
+  const mode = $('media-scale').value;
+  const {transform, maximum} = mediaChartScale(rows, mode);
+  const ticks = mode === 'linear' ? Math.min(4, maximum) : 4;
+  const step = mode === 'linear' ? Math.ceil(maximum / ticks) : maximum / ticks;
   const left = Math.max(35, fmt(ticks * step).length * 8 + 12);
   const xAt = i => rows.length <= 1 ? (left + right) / 2 : left + i * (right - left) / (rows.length - 1);
   const yAt = value => bottom - (bottom - top) * value / (ticks * step);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.setAttribute('role', 'group');
-  svg.setAttribute('aria-label', '記事掲載日基準の語句出現回数');
+  svg.setAttribute('aria-label', '記事掲載日基準の'+countLabel());
   function node(tag, attrs, text, parent = svg) {
     const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (const [key, value] of Object.entries(attrs)) n.setAttribute(key, value);
@@ -106,7 +107,7 @@ function chart(rows) {
     node('text', {x, y:bottom+21, 'text-anchor':anchor, class:'chart-date-label'}, rows[index].date);
   }
 
-  const points = rows.map((row,index)=>({row,index,x:xAt(index),y:yAt(row.occurrences),
+  const points = rows.map((row,index)=>({row,index,x:xAt(index),y:yAt(transform(row.occurrences)),
     known:!unknownStates.has(row.collectionState)}));
   let segment = [];
   function drawSegment() {
@@ -130,7 +131,7 @@ function chart(rows) {
   const terms = dataset.terms.filter(t=>(state.term==='all' || String(t.id)===state.term)
                                    && (state.topic==='all' || t.topic===state.topic));
   const termLabel = terms.length===1 ? terms[0].phrase : state.topic==='all' ?
-    '正式17語の合計' : dataset.themes.find(t=>t.id===state.topic).label+'の合計';
+    (edition === 'english' ? '17系列のいずれかに一致' : '正式17語の合計') : dataset.themes.find(t=>t.id===state.topic).label+'の合計';
   const siteLabel = state.site==='all' ? null : dataset.sites.find(s=>s.id===state.site).label;
   const dateLabel = state.grain==='day' ? '記事掲載日' : '記事掲載日（集計期間開始）';
   const dayOf = row => row.date.length === 7 ? row.date+'-01' : row.date;
@@ -161,21 +162,23 @@ function chart(rows) {
     horizontal.setAttribute('visibility',point.known?'visible':'hidden');
     const details = [
       ...periodHeading(row.period,state.grain,'掲載日基準'),
-      el('div','中国メディア・記事掲載日ベース・語句出現回数'),
+      el('div','中国メディア・記事掲載日ベース・'+countLabel()),
     ];
     const close = action('閉じる',()=>{pinned=null;hide();});
     close.className='chart-tooltip-close';
     details.push(close);
     const summary=el('ul');
-    summary.append(tooltipRow(termLabel,point.known ? `${fmt(row.occurrences)}回` : '欠測・未確認','#006b59'));
+    summary.append(tooltipRow(termLabel,point.known ? `${fmt(row.occurrences)}${edition === 'english' ? '件' : '回'}` : '欠測・未確認','#006b59'));
     details.push(summary);
+    if (point.known && mode !== 'linear') details.push(el('div',
+      `${mode === 'log' ? 'log₁₀(1＋実数)' : '正規化指数'} ${transform(row.occurrences).toFixed(2)}`));
     if (row.period.days>1) details.push(el('div',`保存観測を確認した掲載日 ${row.observedDays}／${row.period.days}日（収集の網羅性は未確認）`));
     if (siteLabel) details.push(el('div', `媒体：${siteLabel}`));
     if (terms.length > 1) {
       const hits = terms.filter(t=>row.termOccurrences[t.id] > 0);
       if (hits.length) {
         const list = el('ul');
-        for (const term of hits) list.append(el('li', `${term.phrase}：${fmt(row.termOccurrences[term.id])}回`));
+        for (const term of hits) list.append(el('li', `${term.phrase}：${fmt(row.termOccurrences[term.id])}${edition === 'english' ? '件' : '回'}`));
         details.push(list);
       }
     }
@@ -207,7 +210,7 @@ function chart(rows) {
     if(point.known)point.marker = node('circle', {cx:x,cy:y,r:4.5,class:'chart-marker'}, undefined, markers);
     const target = point.target = node('g', {
       class:'chart-point', role:'button', tabindex:i===0 ? 0 : -1,
-      'aria-label':`${dateLabel} ${dayOf(row)}、${termLabel}、${point.known ? fmt(row.occurrences)+'回' : '欠測・未確認'}${siteLabel ? '、'+siteLabel : ''}`,
+      'aria-label':`${dateLabel} ${dayOf(row)}、${termLabel}、${point.known ? fmt(row.occurrences)+(edition === 'english' ? '件' : '回') : '欠測・未確認'}${siteLabel ? '、'+siteLabel : ''}`,
     }, undefined, targets);
     const xStart = point.xStart = index===0 ? left-12 : (xAt(index-1)+x)/2;
     const xEnd = point.xEnd = index===rows.length-1 ? right+12 : (x+xAt(index+1))/2;
@@ -249,6 +252,13 @@ const overviewSource = {
 };
 const articlePageSize = 10;
 let dataset, state, articles, articlePage, printGroups = [];
+let edition = 'china';
+const countLabel = () => edition === 'english' ? '一致記事数' : '出現回数';
+function editionURL(filters = {}) {
+  const params = new URLSearchParams(toURL(filters).slice(1));
+  if (edition === 'english') params.set('edition', edition);
+  return '?' + params.toString();
+}
 function articleCard(article) {
   const card = el('article', undefined, 'article');
   const site = dataset.sites.find(s=>s.id===article.site);
@@ -261,7 +271,7 @@ function articleCard(article) {
   card.append(
     el('p',article.m_api_csv && !article.body_ok && !article.matches.length
       ? '本文一致未確認'
-      : `出現 ${article.matches.reduce((sum,match)=>sum+match.occurrences,0)}回`),
+      : edition === 'english' ? `${article.matches.length}系列に一致` : `出現 ${article.matches.reduce((sum,match)=>sum+match.occurrences,0)}回`),
     el('p',`記事掲載日 ${article.published_day || '未確認'}${article.publication_basis ? '（' + publicationBasis[article.publication_basis] + '）' : ''} ／ 初回観測 ${date(article.first_seen_at)}`),
     el('p',`${article.m_api_csv ? 'M API（手動CSV）' : ({openai:'OpenAI補完',openai_multiple:'複数経路（OpenAIで初回発見）',multiple:'複数経路',m_api:'M APIで初回発見'})[article.discovery] || '通常収集'} ／ ${article.body_ok?'本文抽出済み':article.body_received?'部分テキスト':article.attempted?'本文取得・抽出未完了':'本文未確認'}`),
     el('p',article.overview?.text || '概要未取得'),
@@ -297,11 +307,12 @@ function renderThemes() {
     const details = el('details');
     details.dataset.theme = theme.id;
     details.open = open.has(theme.id) || state.topic===theme.id;
-    details.append(el('summary',`${theme.label}（${terms.length}語）`));
+    details.append(el('summary',edition === 'english' ? theme.label : `${theme.label}（${terms.length}語）`));
     const keywords = el('div',undefined,'theme-keywords');
     for (const term of terms) {
       const selected = state.term===String(term.id);
-      const button = action(term.phrase,()=>drill({topic:selected?'all':theme.id,term:selected?'all':String(term.id)}));
+      const label = edition === 'english' ? theme.expressions.join(' / ') : term.phrase;
+      const button = action(label,()=>drill({topic:selected?'all':theme.id,term:selected?'all':String(term.id)}));
       button.setAttribute('aria-pressed',String(selected));
       keywords.append(button);
     }
@@ -332,7 +343,7 @@ $('print-filters').textContent = [
   selectedLabel('site'), selectedLabel('term'), selectedLabel('topic'),
   selectedLabel('route'), selectedLabel('axis'), selectedLabel('grain'),
 ].join(' ／ ');
-$('axis-note').textContent = '記事掲載日基準で、保存済みの正式17語の出現回数を集計しています。掲載日不明・矛盾の記事はグラフに含めません。';
+$('axis-note').textContent = edition === 'english' ? '記事掲載日基準で、本文が一致した記事を集計します。同じURLは1件です。' : '記事掲載日基準で、保存済みの正式17語の出現回数を集計しています。掲載日不明・矛盾の記事はグラフに含めません。';
 const monthly = new Map();
 for (const row of [...dataset.cohorts, ...dataset.articles]) {
   if (!includesRoute(row,state.route) || !row.published_day || row.published_day < state.start || row.published_day > state.end
@@ -370,7 +381,7 @@ const matchValue = n => n || result.matchingKnown ? n : null;
 $('metrics').replaceChildren(...[
   ['発見・観測記事数', s.observed, '同じURLは1記事'],
   ['一致確認済み記事数', matchValue(s.matched), '保存した一致証拠がある記事'],
-  ['確認済み出現回数', matchValue(s.occurrences), '記事・語句・照合箇所ごとの集計'],
+  edition === 'english' ? ['系列別一致の合計', matchValue(s.occurrences), '記事ごとに同じ系列は1件'] : ['確認済み出現回数', matchValue(s.occurrences), '記事・語句・照合箇所ごとの集計'],
   ['本文未確認記事数', s.unjudged, `未試行 ${fmt(s.unattempted)} ／ 試行済み・未成功 ${fmt(s.attemptedUnresolved)}`],
 ].map(([label, n, definition]) => {
   const box = el('div', undefined, 'metric');
@@ -378,14 +389,14 @@ $('metrics').replaceChildren(...[
   return box;
 }));
 $('scope').textContent=`${dataset.metadata.state_definition} ${state.term!=='all'||state.topic!=='all'?'語句・テーマ指定中の観測母数は、その条件で一致が確認できた記事に限定します。':''} HTTP取得成功率 ${pct(s.httpRate)} ／ 抽出成功率 ${pct(s.extractRate)} ／ 累積取得試行 ${fmt(s.attempts)}件。本文対象外 ${fmt(s.bodyNA)}記事。`;
-$('chart-label').textContent='記事掲載日基準 · 出現回数 · '+({day:'日別',week:'週別',month:'月別'}[state.grain]);
-chart(result.publicationSeries);
+$('chart-label').textContent='記事掲載日基準 · '+countLabel()+' · '+({day:'日別',week:'週別',month:'月別'}[state.grain]);
+chart(edition === 'english' ? result.publicationSeries.map(row => ({...row, occurrences: row.matched})) : result.publicationSeries);
 const undated = result.unassignedPublication;
-$('publication-unassigned').textContent = `掲載日不明・矛盾 ${fmt(undated.observed)}記事 ／ 保存済み一致 ${fmt(undated.matched)}記事・${fmt(undated.occurrences)}回（選択中の媒体・語句・発見経路。期間に割り当てられません）`;
-table('series-table',['掲載日・集計期間開始','保存記事の状態','出現回数'],result.publicationSeries.map(r=>[
+$('publication-unassigned').textContent = `掲載日不明・矛盾 ${fmt(undated.observed)}記事 ／ 保存済み一致 ${fmt(undated.matched)}記事${edition === 'english' ? '' : '・'+fmt(undated.occurrences)+'回'}（選択中の媒体・語句・発見経路。期間に割り当てられません）`;
+table('series-table',['掲載日・集計期間開始','保存記事の状態',countLabel()],result.publicationSeries.map(r=>[
   action(r.date,()=>periodDrill(r.date)),
   ({saved:'保存記事あり',no_run:'掲載記事の保存未確認',unjudged:'発見済み・一致未確認'})[r.collectionState],
-  unknownStates.has(r.collectionState)?'未確認':fmt(r.occurrences),
+  unknownStates.has(r.collectionState)?'未確認':fmt(edition === 'english' ? r.matched : r.occurrences),
 ]));
 renderThemes();
 table('matrix',['媒体',...dataset.themes.map(theme=>theme.label)],result.matrix.map(({site,cells})=>[
@@ -407,13 +418,55 @@ articles = result.articles;
 articlePage = 0;
 renderArticles();
 $('limits').replaceChildren(...[dataset.metadata.time_definition,dataset.metadata.occurrence_definition,...dataset.metadata.limitations].map(s=>el('li',s)));$('version').textContent=dataset.metadata.dictionary_version;$('dictionary').textContent=dataset.terms.map(t=>t.phrase).join(' ／ ');
-history.replaceState(null,'',toURL(state));
-$('print-url').textContent = new URL(toURL({...state, preset:'custom'}), location.href).href;
+history.replaceState(null,'',editionURL(state));
+$('print-url').textContent = new URL(editionURL({...state, preset:'custom'}), location.href).href;
 }
+$('media-scale').addEventListener('change', () => { if (chartRows) chart(chartRows); });
 function apply(input){try{state=resolveState(input,dataset);render();}catch(e){$('error').hidden=false;$('error').textContent=e.message;}}
 export async function start(){try{const response=await fetch(new URL('./data.json',import.meta.url),{cache:'no-cache'});if(!response.ok)throw Error('公開データの読込に失敗しました。');dataset=await response.json();dataset.themes ||= [...new Set(dataset.terms.map(t=>t.topic))].map(id=>({id,label:id}));if(dataset.metadata.schema_version!==1)throw Error('未対応のデータ形式です。');
-if (dataset.japanese_x) setupJapaneseX(dataset);
-for(const [id,rows] of [['site',dataset.sites.map(s=>[s.id,s.label])],['term',dataset.terms.map(t=>[String(t.id),t.phrase])],['topic',dataset.themes.map(t=>[t.id,t.label])]])for(const [value,label] of rows){const o=el('option',label);o.value=value;$(id).append(o);}
+const chinese = dataset;
+const drawX = chinese.japanese_x ? setupJapaneseX(chinese) : null;
+$('x-tab').disabled = !drawX;
+
+function setMediaOptions() {
+for(const [id,rows] of [['site',dataset.sites.map(s=>[s.id,s.label])],['term',dataset.terms.map(t=>[String(t.id),t.phrase])],['topic',dataset.themes.map(t=>[t.id,t.label])]]){
+  const select = $(id);
+  select.replaceChildren(select.options[0]);
+  for(const [value,label] of rows){const o=el('option',label);o.value=value;select.append(o);}
+}
+}
+
+function showTab(key, useURL = false) {
+  const englishMissing = key === 'english' && !chinese.english_media;
+  if (key !== edition) articles = null;
+  $('english-unavailable').hidden = !englishMissing;
+  $('china-panel').hidden = englishMissing || key === 'x';
+  $('x-panel').hidden = key !== 'x';
+  for (const tab of ['china','english','x']) {
+    $(tab+'-tab').setAttribute('aria-pressed', String(tab === key));
+  }
+  if (key === 'x') { drawX(); return; }
+  edition = key;
+  if (englishMissing) {
+    history.replaceState(null,'',editionURL());
+    return;
+  }
+  dataset = key === 'english' ? chinese.english_media : chinese;
+  setMediaOptions();
+  if (useURL) {
+    try {state=fromURL(location.search,dataset);}
+    catch(e) {
+      state=resolveState({},dataset);
+      render();
+      $('error').hidden=false;
+      $('error').textContent='URLの条件が不正なため初期表示に戻しました。 '+e.message;
+      return;
+    }
+  } else {
+    state=resolveState({},dataset);
+  }
+  render();
+}
 for(const [value,label] of [['7','直近7日'],['30','直近30日'],['90','直近90日'],['6mo','直近6か月'],['365','直近1年間'],['all','全期間'],['custom','任意期間']]){const b=el('button',label);b.type='button';b.dataset.preset=value;b.addEventListener('click', () => {
   if (value === 'custom') $('start').closest('details').open = true;
   apply({...state, preset:value, grain:undefined});
@@ -425,8 +478,14 @@ $('clear-filters').addEventListener('click',()=>apply({...state,site:'all',term:
 $('previous').addEventListener('click', () => { articlePage--; renderArticles(); });
 $('next').addEventListener('click', () => { articlePage++; renderArticles(); });
 $('clear-theme').addEventListener('click',()=>apply({...state,term:'all',topic:'all'}));
-$('fixed-link').addEventListener('click',()=>apply({...state,preset:'custom'}));window.addEventListener('popstate',()=>{try{apply(fromURL(location.search,dataset));}catch(e){$('error').hidden=false;$('error').textContent=e.message;}});
-try{state=fromURL(location.search,dataset);}catch(e){state=resolveState({},dataset);render();$('error').hidden=false;$('error').textContent='URLの条件が不正なため初期表示に戻しました。 '+e.message;return;}render();
+$('fixed-link').addEventListener('click',()=>apply({...state,preset:'custom'}));
+const urlEdition = () => new URLSearchParams(location.search).get('edition') === 'english' ? 'english' : 'china';
+for (const tab of ['china','english','x']) $(tab+'-tab').addEventListener('click', () => {
+  if ($(tab+'-tab').getAttribute('aria-pressed') !== 'true') showTab(tab);
+});
+window.addEventListener('popstate',()=>showTab(urlEdition(),true));
+$('monitor-tabs').hidden = false;
+showTab(urlEdition(), true);
 }catch(e){$('loading').textContent='データを表示できません。';$('error').hidden=false;$('error').textContent=e.message;}}
 window.addEventListener('beforeprint', () => {
   if (articles) renderArticles(true);
@@ -498,14 +557,7 @@ function setupJapaneseX(data) {
   inspector.addEventListener('keydown', event => {if(event.key==='Escape')dismissTooltip();});
   resultTable.addEventListener('toggle', () => { if (resultTable.open) renderTable(); });
   for (const id of ['x-grain','x-scale','x-comparison']) $(id).addEventListener('change',render);
-  for (const key of ['china','x']) $(key+'-tab').addEventListener('click',() => {
-    for (const panel of ['china','x']) {
-      $(panel+'-panel').hidden = panel !== key;
-      $(panel+'-tab').setAttribute('aria-pressed',String(panel === key));
-    }
-    if (key === 'x') render();
-  });
-  $('monitor-tabs').hidden = false;
+  return render;
 
   function render() {
     const selected = new Set(inputs.filter(([,input]) => input.checked).map(([id]) => id));

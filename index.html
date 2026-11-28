@@ -8,8 +8,9 @@
 <body><header><h1>Narrative Monitor</h1><div class="updated">データ生成（JST） <strong id="updated">読込中</strong></div></header>
 <main>
 <nav id="monitor-tabs" class="panel monitor-tabs" aria-label="ダッシュボード" hidden>
-<button type="button" id="china-tab" aria-pressed="true" aria-controls="china-panel">中国メディア</button>
-<button type="button" id="x-tab" aria-pressed="false" aria-controls="x-panel">日本語X投稿動向</button>
+<button type="button" id="china-tab" aria-pressed="true" aria-controls="china-panel">中国メディア（簡体字）</button>
+<button type="button" id="english-tab" aria-pressed="false" aria-controls="china-panel english-unavailable">中国メディア（英語）</button>
+<button type="button" id="x-tab" aria-pressed="false" aria-controls="x-panel">日本語X動向</button>
 </nav>
 <section id="x-panel" class="panel" aria-labelledby="x-heading" hidden>
 <div class="section-heading"><h2 id="x-heading">日本語X投稿動向</h2><span>データソース　M API</span></div>
@@ -38,6 +39,7 @@
 <details id="x-table-details"><summary>期間別データ</summary><div class="scroll" id="x-table"></div></details>
 <ul id="x-limitations" class="note"></ul>
 </section>
+<p id="english-unavailable" class="panel" role="status" hidden>英語版の公開データはまだありません。</p>
 <div id="china-panel">
 <section class="print-context" aria-label="印刷条件"><p id="print-filters"></p><p id="print-url"></p><p id="printed-at"></p></section>
 <form id="filters" class="panel filters"><div class="preset-row" id="presets" aria-label="期間プリセット"></div>
@@ -58,7 +60,7 @@
 <div id="loading" role="status">保存済み観測データを読み込んでいます。</div>
 <div id="content" hidden>
 <section class="metrics" id="metrics" aria-label="選択期間の概要"></section>
-<section class="panel"><div class="section-heading"><h2>語句の出現推移</h2><span id="chart-label"></span></div>
+<section class="panel"><div class="section-heading"><h2>語句の出現推移</h2><label>表示スケール <select id="media-scale"><option value="linear">線形</option><option value="log">対数</option><option value="normalized">正規化（最大＝100）</option></select></label><span id="chart-label"></span></div>
 <div id="chart" aria-label="記事掲載日基準の語句出現回数"></div>
 <p class="note"><span id="axis-note"></span> 空白はその期間の掲載記事・一致証拠が未確認です。点にカーソルを合わせるかタップすると内訳を表示します。キーボードでは左右キーで点を移動できます。</p>
 <p class="note" id="publication-unassigned"></p>
