@@ -336,6 +336,23 @@ for(const k of ['start','end','site','term','topic','grain','axis','route','sort
 for(const b of $('presets').children)b.setAttribute('aria-pressed',String(b.dataset.preset===state.preset));
 $('updated').textContent=date(dataset.metadata.generated_at_jst);$('latest').textContent='選択媒体・期間終端までの最新収集成功: '+date(result.latestSuccess);
 $('period-note').textContent = `${state.start} 〜 ${state.end}（${state.axis==='published'?'記事掲載日':'初回観測日・JST'}）`;
+const searchCoverage = $('english-search-coverage');
+searchCoverage.hidden = edition !== 'english' || !dataset.search_coverage;
+$('english-search-periods').hidden = searchCoverage.hidden;
+if (!searchCoverage.hidden) {
+  const coverage = {complete: 0, partial: 0, unverified: 0}, periods = [];
+  const labels = {complete: '検索済み', partial: '一部検索', unverified: '未確認'};
+  for (const row of dataset.search_coverage) {
+    if (row.day < state.start || row.day > state.end) continue;
+    coverage[row.state]++;
+    const previous = periods.at(-1);
+    if (previous?.state === row.state) previous.end = row.day;
+    else periods.push({start: row.day, end: row.day, state: row.state});
+  }
+  searchCoverage.textContent = `選択期間のM API検索状況（完了済みUTC日） 検索済み ${fmt(coverage.complete)}日 ／ 一部検索 ${fmt(coverage.partial)}日 ／ 未確認 ${fmt(coverage.unverified)}日。記事の集計には保存済みの観測を表示します。`;
+  $('english-search-period-list').replaceChildren(...periods.map(row =>
+    el('li', `${row.start}${row.start === row.end ? '' : ' 〜 ' + row.end}　${labels[row.state]}`)));
+}
 $('clear-filters').disabled = ['site','term','topic','route'].every(key=>state[key]==='all');
 const selectedLabel = id => $(id).selectedOptions[0].textContent;
 $('print-filters').textContent = [
