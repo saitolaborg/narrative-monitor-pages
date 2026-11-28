@@ -336,6 +336,12 @@ for(const k of ['start','end','site','term','topic','grain','axis','route','sort
 for(const b of $('presets').children)b.setAttribute('aria-pressed',String(b.dataset.preset===state.preset));
 $('updated').textContent=date(dataset.metadata.generated_at_jst);$('latest').textContent='選択媒体・期間終端までの最新収集成功: '+date(result.latestSuccess);
 $('period-note').textContent = `${state.start} 〜 ${state.end}（${state.axis==='published'?'記事掲載日':'初回観測日・JST'}）`;
+const spot = edition === 'english' ? dataset.partial_spots?.at(-1) : null;
+const spotNote = $('english-partial-spot');
+spotNote.hidden = !spot;
+if (spot) {
+  spotNote.textContent = `部分集計（全7媒体・JST） ${spot.start.slice(0, 10)} ${spot.start.slice(11, 19)} 〜 ${spot.end.slice(11, 19)}。期間内の発見 ${fmt(spot.dated_articles)}記事、本文照合済み ${fmt(spot.checked_articles)}記事、全系列OR一致 ${fmt(spot.matched_articles)}記事。${spot.saturated ? '検索上限に達したため、この時間帯も一部のみです。' : ''}終了時刻より後はこの集計では未確認です。`;
+}
 const searchCoverage = $('english-search-coverage');
 searchCoverage.hidden = edition !== 'english' || !dataset.search_coverage;
 $('english-search-periods').hidden = searchCoverage.hidden;
